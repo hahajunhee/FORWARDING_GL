@@ -138,6 +138,35 @@ function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]
   }
 }
 
+// ── 병합 스팬 계산 ────────────────────────────────────────────────
+
+function computeColSpans(
+  rows: Booking[], col: string, mergeEnabled: boolean,
+  customColumns: ColumnDefinition[]
+): { span: number; skip: boolean }[] {
+  if (!mergeEnabled || rows.length === 0) return rows.map(() => ({ span: 1, skip: false }))
+  const result = rows.map(() => ({ span: 1, skip: false }))
+  let i = 0
+  while (i < rows.length) {
+    const val = getSortValue(rows[i], col, customColumns)
+    if (!val) { i++; continue }
+    let j = i + 1
+    while (j < rows.length && getSortValue(rows[j], col, customColumns) === val) j++
+    if (j - i > 1) {
+      result[i] = { span: j - i, skip: false }
+      for (let k = i + 1; k < j; k++) result[k] = { span: 1, skip: true }
+    }
+    i = j
+  }
+  return result
+}
+
+function buildSpanMaps(rows: Booking[], mergeEnabled: boolean, customColumns: ColumnDefinition[]) {
+  const maps: Record<string, { span: number; skip: boolean }[]> = {}
+  for (const col of ALWAYS_MERGE_COLS) maps[col] = computeColSpans(rows, col, mergeEnabled, customColumns)
+  return maps
+}
+
 function exportToExcel(rows: Booking[], customColumns: ColumnDefinition[]) {
   import('xlsx').then((XLSX) => {
     const data = rows.map(b => {
@@ -507,6 +536,7 @@ export default function BookingTable({
   const [etdFrom, _setEtdFrom] = useState('')
   const [etdTo, _setEtdTo] = useState('')
   const [docFilter, _setDocFilter] = useState(false)
+  const [mergeEnabled, _setMergeEnabled] = useState(true)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<{ field: string; value: string }[]>([])
 
@@ -524,6 +554,7 @@ export default function BookingTable({
       const et = localStorage.getItem('bk_etdTo')
       if (et) _setEtdTo(et)
       if (localStorage.getItem('bk_monthView') === 'true') _setMonthView(true)
+      if (localStorage.getItem('bk_mergeEnabled') === 'false') _setMergeEnabled(false)
       const storedSorts = localStorage.getItem('bk_sorts')
       if (storedSorts) _setSorts(JSON.parse(storedSorts))
     } catch {}
@@ -550,6 +581,7 @@ export default function BookingTable({
       return next
     })
   }
+  const setMergeEnabled = (v: boolean) => { _setMergeEnabled(v); ls('bk_mergeEnabled', String(v)) }
   const setSorts = (updater: SortItem[] | ((p: SortItem[]) => SortItem[])) => {
     _setSorts(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
@@ -815,7 +847,12 @@ export default function BookingTable({
     return true
   }
 
-  function renderDataRow(booking: Booking, prevBooking?: Booking | null, nextBooking?: Booking | null) {
+  function renderDataRow(
+    booking: Booking,
+    rowSpans: Record<string, { span: number; skip: boolean }>,
+    prevBooking?: Booking | null,
+    nextBooking?: Booking | null,
+  ) {
     const edits = rowEdits[booking.id] || {}
     const merged: Partial<Booking> = { ...booking, ...edits }
     const hasEdits = Object.keys(edits).length > 0
@@ -826,12 +863,6 @@ export default function BookingTable({
     const isGroupEnd = !nextBooking || !isSameGroup(booking, nextBooking)
     const groupBorder = '1.5px solid #9ca3af'
     const colBorder = '1px solid #e5e7eb'
-    const cellBorderStyle = {
-      borderTop: isGroupStart ? groupBorder : '1px solid transparent',
-      borderBottom: isGroupEnd ? groupBorder : '1px solid transparent',
-      borderLeft: colBorder,
-      borderRight: colBorder,
-    }
 
     return (
       <tr key={booking.id}
@@ -843,15 +874,23 @@ export default function BookingTable({
         {colsToRender.map(col => {
           const def = allColDefs[col]
           if (!def) return null
+
+          const isMergeCol = ALWAYS_MERGE_COLS.has(col)
+          const spanInfo = isMergeCol ? (rowSpans[col] ?? { span: 1, skip: false }) : { span: 1, skip: false }
+          if (spanInfo.skip) return null
+
+          const rowSpan = spanInfo.span > 1 ? spanInfo.span : undefined
+          const isMergedSpan = spanInfo.span > 1
           const isPinned = pinnedColumns.includes(col)
           const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs)
           const isDocCol = col === 'doc_cutoff_date'
-          const isMergeCandidate = ALWAYS_MERGE_COLS.has(col) || (sorts.length > 0 && col === sorts[0].col)
-          const isMergedCell = !editMode && isMergeCandidate && !!prevBooking
-            && getSortValue(booking, col, customColumns) === getSortValue(prevBooking, col, customColumns)
-            && getSortValue(booking, col, customColumns) !== ''
+
+          const tdIsGroupStart = isMergedSpan ? true : isGroupStart
+          const tdIsGroupEnd = isMergedSpan ? true : isGroupEnd
+
           return (
             <td key={col}
+              rowSpan={rowSpan}
               onClick={!editMode && isDocCol && booking.doc_cutoff_date ? () => setDocFilter(v => !v) : undefined}
               className={`table-td text-xs
                 ${isPinned ? 'sticky z-10 bg-white' : ''}
@@ -862,16 +901,25 @@ export default function BookingTable({
                 minWidth: def.minW,
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
                 ...(isPinned ? { backgroundColor: handlerColor || 'white' } : {}),
-                ...cellBorderStyle,
+                borderTop: tdIsGroupStart ? groupBorder : '1px solid transparent',
+                borderBottom: tdIsGroupEnd ? groupBorder : '1px solid transparent',
+                borderLeft: colBorder,
+                borderRight: colBorder,
+                ...(isMergedSpan ? { verticalAlign: 'middle' } : {}),
               }}>
-              {!isMergedCell && (editMode
+              {editMode
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} />
                 : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} />
-              )}
+              }
             </td>
           )
         })}
-        <td className="table-td" style={cellBorderStyle}>
+        <td className="table-td" style={{
+          borderTop: isGroupStart ? groupBorder : '1px solid transparent',
+          borderBottom: isGroupEnd ? groupBorder : '1px solid transparent',
+          borderLeft: colBorder,
+          borderRight: colBorder,
+        }}>
           {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
           <div className="flex items-center gap-1 flex-wrap">
             {editMode && hasEdits && (
@@ -929,6 +977,17 @@ export default function BookingTable({
   }
 
   function renderBody() {
+    const effectiveMerge = mergeEnabled && !editMode
+
+    function renderRows(rows: Booking[]) {
+      const spanMaps = buildSpanMaps(rows, effectiveMerge, customColumns)
+      return rows.map((b, i) => {
+        const rowSpans: Record<string, { span: number; skip: boolean }> = {}
+        for (const col of ALWAYS_MERGE_COLS) rowSpans[col] = spanMaps[col][i]
+        return renderDataRow(b, rowSpans, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null)
+      })
+    }
+
     if (monthView && monthGroups) {
       return (
         <>
@@ -944,14 +1003,14 @@ export default function BookingTable({
                     <span className="ml-2 font-normal text-gray-400">({rows.length}건)</span>
                   </td>
                 </tr>
-                {!collapsed && rows.map((b, i) => renderDataRow(b, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null))}
+                {!collapsed && renderRows(rows)}
               </>
             )
           })}
         </>
       )
     }
-    return <>{processed.map((b, i) => renderDataRow(b, i > 0 ? processed[i - 1] : null, i < processed.length - 1 ? processed[i + 1] : null))}</>
+    return <>{renderRows(processed)}</>
   }
 
   const editBtnLabel = bulkSaving ? '저장 중...' : editMode ? '편집 OFF (저장)' : '편집'
@@ -1034,6 +1093,11 @@ export default function BookingTable({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
               {editBtnLabel}
+            </button>
+            <button onClick={() => setMergeEnabled(!mergeEnabled)}
+              className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${mergeEnabled ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              title="포워더 담당·고객사 서류·도착지·양하항·선사 열 병합 ON/OFF">
+              병합
             </button>
             <button onClick={handleToggleMonthView}
               className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${monthView ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
