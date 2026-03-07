@@ -808,12 +808,30 @@ export default function BookingTable({
 
   // ── 행 렌더링 ─────────────────────────────────────────────────────
 
-  function renderDataRow(booking: Booking, prevBooking?: Booking | null) {
+  function isSameGroup(a: Booking, b: Booking): boolean {
+    for (const col of ALWAYS_MERGE_COLS) {
+      if (getSortValue(a, col, customColumns) !== getSortValue(b, col, customColumns)) return false
+    }
+    return true
+  }
+
+  function renderDataRow(booking: Booking, prevBooking?: Booking | null, nextBooking?: Booking | null) {
     const edits = rowEdits[booking.id] || {}
     const merged: Partial<Booking> = { ...booking, ...edits }
     const hasEdits = Object.keys(edits).length > 0
     const err = rowErrors[booking.id]
     const handlerColor = booking.forwarder_handler?.color || ''
+
+    const isGroupStart = !prevBooking || !isSameGroup(booking, prevBooking)
+    const isGroupEnd = !nextBooking || !isSameGroup(booking, nextBooking)
+    const groupBorder = '1.5px solid #9ca3af'
+    const colBorder = '1px solid #e5e7eb'
+    const cellBorderStyle = {
+      borderTop: isGroupStart ? groupBorder : '1px solid transparent',
+      borderBottom: isGroupEnd ? groupBorder : '1px solid transparent',
+      borderLeft: colBorder,
+      borderRight: colBorder,
+    }
 
     return (
       <tr key={booking.id}
@@ -844,7 +862,7 @@ export default function BookingTable({
                 minWidth: def.minW,
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
                 ...(isPinned ? { backgroundColor: handlerColor || 'white' } : {}),
-                ...(isMergedCell ? { borderTopColor: 'transparent' } : {}),
+                ...cellBorderStyle,
               }}>
               {!isMergedCell && (editMode
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} />
@@ -853,7 +871,7 @@ export default function BookingTable({
             </td>
           )
         })}
-        <td className="table-td">
+        <td className="table-td" style={cellBorderStyle}>
           {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
           <div className="flex items-center gap-1 flex-wrap">
             {editMode && hasEdits && (
@@ -891,16 +909,17 @@ export default function BookingTable({
           if (!def) return null
           const isPinned = pinnedColumns.includes(col)
           const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs)
+          const newRowBorder = { border: '1px solid #e5e7eb' }
           return (
             <td key={col} className={`table-td text-xs ${isPinned ? 'sticky z-10' : ''}`}
-              style={{ minWidth: def.minW, ...(fixedLeft !== null ? { left: fixedLeft } : {}), ...(isPinned ? { backgroundColor: '#f5f3ff' } : {}) }}>
+              style={{ minWidth: def.minW, ...(fixedLeft !== null ? { left: fixedLeft } : {}), ...(isPinned ? { backgroundColor: '#f5f3ff' } : {}), ...newRowBorder }}>
               <EditCell colKey={col} row={row as unknown as Partial<Booking>} profiles={profiles}
                 destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns}
                 onChange={c => handleNewRowChange(row.tempId, c as Partial<Booking>)} />
             </td>
           )
         })}
-        <td className="table-td">
+        <td className="table-td" style={{ border: '1px solid #e5e7eb' }}>
           {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
           <button onClick={() => { setNewRows(prev => prev.filter(r => r.tempId !== row.tempId)); setRowErrors(p => { const c = { ...p }; delete c[row.tempId]; return c }) }}
             className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">제거</button>
@@ -925,14 +944,14 @@ export default function BookingTable({
                     <span className="ml-2 font-normal text-gray-400">({rows.length}건)</span>
                   </td>
                 </tr>
-                {!collapsed && rows.map((b, i) => renderDataRow(b, i > 0 ? rows[i - 1] : null))}
+                {!collapsed && rows.map((b, i) => renderDataRow(b, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null))}
               </>
             )
           })}
         </>
       )
     }
-    return <>{processed.map((b, i) => renderDataRow(b, i > 0 ? processed[i - 1] : null))}</>
+    return <>{processed.map((b, i) => renderDataRow(b, i > 0 ? processed[i - 1] : null, i < processed.length - 1 ? processed[i + 1] : null))}</>
   }
 
   const editBtnLabel = bulkSaving ? '저장 중...' : editMode ? '편집 OFF (저장)' : '편집'

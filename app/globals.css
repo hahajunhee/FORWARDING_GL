@@ -34,11 +34,11 @@
   }
 
   .table-th {
-    @apply px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border-b border-gray-200;
+    @apply px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border-x border-gray-200 border-b-2 border-b-gray-300;
   }
 
   .table-td {
-    @apply px-3 py-2.5 text-sm text-gray-700 whitespace-nowrap border-b border-gray-300;
+    @apply px-3 py-2.5 text-sm text-gray-700 whitespace-nowrap;
   }
 }
 
