@@ -173,22 +173,24 @@ export default function BookingPageLayout({
         </aside>
 
         {/* 메인 컨텐츠 */}
-        <main className="flex-1 min-w-0 p-4 overflow-auto">
+        <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {activeTab === 'bookings' && (
-            <BookingTable
-              bookings={bookings}
-              profiles={profiles}
-              currentUserId={currentUserId}
-              currentProfile={currentProfile}
-              customLists={customLists}
-              pinnedColumns={pinnedColumns}
-              customColumns={customColumns}
-              regionList={regionList}
-              customerList={customerList}
-            />
+            <div className="flex-1 min-h-0 flex flex-col p-4">
+              <BookingTable
+                bookings={bookings}
+                profiles={profiles}
+                currentUserId={currentUserId}
+                currentProfile={currentProfile}
+                customLists={customLists}
+                pinnedColumns={pinnedColumns}
+                customColumns={customColumns}
+                regionList={regionList}
+                customerList={customerList}
+              />
+            </div>
           )}
           {activeTab === 'doc_cutoff' && (
-            <div className="space-y-3">
+            <div className="flex-1 overflow-auto p-4 space-y-3">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">서류마감</h2>
                 <p className="text-sm text-gray-500">날짜를 선택하면 해당 날짜 마감 부킹의 메일 초안을 자동 생성합니다.</p>
@@ -203,7 +205,7 @@ export default function BookingPageLayout({
             </div>
           )}
           {activeTab === 'schedule' && (
-            <div className="space-y-3">
+            <div className="flex-1 overflow-auto p-4 space-y-3">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">주요 스케줄</h2>
                 <p className="text-sm text-gray-500">고객사 송부용 스케줄을 열 구성 후 Excel로 다운로드합니다.</p>

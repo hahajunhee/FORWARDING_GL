@@ -8,11 +8,8 @@ import type { Booking, Profile, CustomList, ColumnDefinition, BookingEntry } fro
 import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, CARRIERS, MAJOR_PORTS, DEFAULT_DESTINATIONS } from '@/types'
 import { deleteBooking, saveBookingRow, saveColumnOrder } from '@/app/bookings/actions'
 
-// 정렬과 무관하게 항상 시각적 병합할 열
-const ALWAYS_MERGE_COLS = new Set([
-  'forwarder_handler', 'handler_region', 'handler_customers',
-  'customer_doc_handler', 'final_destination', 'discharge_port', 'carrier',
-])
+// 병합 대상 열 (계층 순서: 최종도착지 → 양하항 → 선사)
+const MERGE_HIERARCHY = ['final_destination', 'discharge_port', 'carrier'] as const
 
 // ── 기본 열 정의 ───────────────────────────────────────────────────
 
@@ -143,32 +140,53 @@ function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]
   }
 }
 
-// ── 병합 스팬 계산 ────────────────────────────────────────────────
+// ── 병합 스팬 계산 (계층적: 최종도착지 → 양하항 → 선사) ─────────
 
-function computeColSpans(
-  rows: Booking[], col: string, mergeEnabled: boolean,
-  customColumns: ColumnDefinition[]
-): { span: number; skip: boolean }[] {
-  if (!mergeEnabled || rows.length === 0) return rows.map(() => ({ span: 1, skip: false }))
-  const result = rows.map(() => ({ span: 1, skip: false }))
+type SpanInfo = { span: number; skip: boolean }
+
+function buildSpanMaps(rows: Booking[], mergeEnabled: boolean): Record<string, SpanInfo[]> {
+  const empty = () => rows.map((): SpanInfo => ({ span: 1, skip: false }))
+  const maps: Record<string, SpanInfo[]> = {
+    final_destination: empty(),
+    discharge_port: empty(),
+    carrier: empty(),
+  }
+  if (!mergeEnabled || rows.length === 0) return maps
+
+  const fd = (b: Booking) => b.final_destination || ''
+  const dp = (b: Booking) => b.discharge_port || ''
+  const ca = (b: Booking) => b.carrier || ''
+
+  // 1. final_destination — 상위 제약 없음
   let i = 0
   while (i < rows.length) {
-    const val = getSortValue(rows[i], col, customColumns)
-    if (!val) { i++; continue }
+    const v = fd(rows[i]); if (!v) { i++; continue }
     let j = i + 1
-    while (j < rows.length && getSortValue(rows[j], col, customColumns) === val) j++
-    if (j - i > 1) {
-      result[i] = { span: j - i, skip: false }
-      for (let k = i + 1; k < j; k++) result[k] = { span: 1, skip: true }
-    }
+    while (j < rows.length && fd(rows[j]) === v) j++
+    if (j - i > 1) { maps.final_destination[i] = { span: j - i, skip: false }; for (let k = i + 1; k < j; k++) maps.final_destination[k] = { span: 1, skip: true } }
     i = j
   }
-  return result
-}
 
-function buildSpanMaps(rows: Booking[], mergeEnabled: boolean, customColumns: ColumnDefinition[]) {
-  const maps: Record<string, { span: number; skip: boolean }[]> = {}
-  for (const col of ALWAYS_MERGE_COLS) maps[col] = computeColSpans(rows, col, mergeEnabled, customColumns)
+  // 2. discharge_port — 같은 final_destination 안에서만
+  i = 0
+  while (i < rows.length) {
+    const fv = fd(rows[i]); const v = dp(rows[i]); if (!v) { i++; continue }
+    let j = i + 1
+    while (j < rows.length && dp(rows[j]) === v && fd(rows[j]) === fv) j++
+    if (j - i > 1) { maps.discharge_port[i] = { span: j - i, skip: false }; for (let k = i + 1; k < j; k++) maps.discharge_port[k] = { span: 1, skip: true } }
+    i = j
+  }
+
+  // 3. carrier — 같은 final_destination + discharge_port 안에서만
+  i = 0
+  while (i < rows.length) {
+    const fv = fd(rows[i]); const dv = dp(rows[i]); const v = ca(rows[i]); if (!v) { i++; continue }
+    let j = i + 1
+    while (j < rows.length && ca(rows[j]) === v && dp(rows[j]) === dv && fd(rows[j]) === fv) j++
+    if (j - i > 1) { maps.carrier[i] = { span: j - i, skip: false }; for (let k = i + 1; k < j; k++) maps.carrier[k] = { span: 1, skip: true } }
+    i = j
+  }
+
   return maps
 }
 
@@ -880,10 +898,7 @@ export default function BookingTable({
   // ── 행 렌더링 ─────────────────────────────────────────────────────
 
   function isSameGroup(a: Booking, b: Booking): boolean {
-    for (const col of ALWAYS_MERGE_COLS) {
-      if (getSortValue(a, col, customColumns) !== getSortValue(b, col, customColumns)) return false
-    }
-    return true
+    return (a.final_destination || '') === (b.final_destination || '')
   }
 
   function renderDataRow(
@@ -914,7 +929,7 @@ export default function BookingTable({
           const def = allColDefs[col]
           if (!def) return null
 
-          const isMergeCol = ALWAYS_MERGE_COLS.has(col)
+          const isMergeCol = MERGE_HIERARCHY.includes(col as typeof MERGE_HIERARCHY[number])
           const spanInfo = isMergeCol ? (rowSpans[col] ?? { span: 1, skip: false }) : { span: 1, skip: false }
           if (spanInfo.skip) return null
 
@@ -1024,10 +1039,10 @@ export default function BookingTable({
     const effectiveMerge = mergeEnabled && !editMode
 
     function renderRows(rows: Booking[]) {
-      const spanMaps = buildSpanMaps(rows, effectiveMerge, customColumns)
+      const spanMaps = buildSpanMaps(rows, effectiveMerge)
       return rows.map((b, i) => {
-        const rowSpans: Record<string, { span: number; skip: boolean }> = {}
-        for (const col of ALWAYS_MERGE_COLS) rowSpans[col] = spanMaps[col][i]
+        const rowSpans: Record<string, SpanInfo> = {}
+        for (const col of MERGE_HIERARCHY) rowSpans[col] = spanMaps[col][i]
         return renderDataRow(b, rowSpans, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null)
       })
     }
@@ -1060,7 +1075,7 @@ export default function BookingTable({
   const editBtnLabel = bulkSaving ? '저장 중...' : editMode ? '편집 OFF (저장)' : '편집'
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col h-full min-h-0 gap-3">
       {/* 유효성 검사 모달 */}
       {validationErrors.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setValidationErrors([])}>
@@ -1083,7 +1098,7 @@ export default function BookingTable({
         </div>
       )}
       {/* 필터 바 */}
-      <div className="bg-white rounded-xl border border-gray-200 p-3">
+      <div className="bg-white rounded-xl border border-gray-200 p-3 flex-shrink-0">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
             <button onClick={() => setViewMode('all')}
@@ -1177,7 +1192,7 @@ export default function BookingTable({
       </div>
 
       {/* 범례 */}
-      <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 px-1">
+      <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 px-1 flex-shrink-0">
         <button onClick={() => setDocFilter(v => !v)}
           className={`flex items-center gap-1.5 px-2 py-0.5 rounded transition-colors ${docFilter ? 'bg-red-100 text-red-700 font-semibold' : 'text-gray-500 hover:bg-red-50'}`}>
           <span className="w-3 h-3 bg-red-100 border border-red-300 rounded inline-block" /> 서류마감 D-3 이내 (클릭 필터)
@@ -1190,7 +1205,7 @@ export default function BookingTable({
 
       {/* 새 행 입력 섹션 (보라색 별도 공간) */}
       {editMode && (
-        <div className="bg-violet-50 rounded-xl border-2 border-violet-200 overflow-hidden">
+        <div className="bg-violet-50 rounded-xl border-2 border-violet-200 overflow-hidden flex-shrink-0">
           <div className="px-4 py-2.5 bg-violet-100 border-b border-violet-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-violet-800">새 행 입력</span>
@@ -1241,10 +1256,9 @@ export default function BookingTable({
       )}
 
       {/* 테이블 */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-200">
           <table className="w-full text-sm border-collapse">
-            <thead>
+            <thead className="sticky top-0 z-20">
               <tr className="bg-gray-50">
                 {colsToRender.map(col => {
                   const def = allColDefs[col]
@@ -1255,7 +1269,7 @@ export default function BookingTable({
                     <th key={col}
                       title={def.description || undefined}
                       className={`table-th select-none transition-colors
-                        ${isPinned ? 'sticky z-20 bg-gray-50' : 'cursor-grab active:cursor-grabbing'}
+                        ${isPinned ? 'sticky z-30 bg-gray-50' : 'bg-gray-50 cursor-grab active:cursor-grabbing'}
                         ${dragSrc === col ? 'opacity-40' : ''}
                         ${dragOver === col && dragSrc !== col ? 'bg-blue-100 text-blue-700' : ''}
                         ${def.description ? 'cursor-help' : ''}
@@ -1289,7 +1303,7 @@ export default function BookingTable({
                     </th>
                   )
                 })}
-                <th className="table-th min-w-[90px]">관리</th>
+                <th className="table-th min-w-[90px] bg-gray-50">관리</th>
               </tr>
             </thead>
             <tbody>
@@ -1314,7 +1328,6 @@ export default function BookingTable({
               ) : renderBody()}
             </tbody>
           </table>
-        </div>
       </div>
     </div>
   )

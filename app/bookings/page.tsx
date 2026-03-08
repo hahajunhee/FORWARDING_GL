@@ -22,7 +22,7 @@ export default async function BookingsPage() {
   ] = await Promise.all([
     supabase
       .from('bookings')
-      .select(`*, forwarder_handler:profiles!bookings_forwarder_handler_id_fkey(id, name, email, color)`)
+      .select(`*, forwarder_handler:profiles!bookings_forwarder_handler_id_fkey(id, name, email, color, region, customers)`)
       .order('created_at', { ascending: false }),
     supabase.from('profiles').select('*').order('name'),
     supabase.from('profiles').select('*').eq('id', user.id).single(),
