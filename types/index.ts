@@ -8,6 +8,7 @@ export interface ColumnDefinition {
   id: string
   key: string
   label: string
+  description: string
   display_order: number
   created_at: string
 }

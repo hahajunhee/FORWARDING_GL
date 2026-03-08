@@ -497,6 +497,8 @@ interface Props {
   customLists: CustomList[]
   pinnedColumns?: string[]
   customColumns?: ColumnDefinition[]
+  regionList?: string[]
+  customerList?: string[]
   onSettingsClick?: () => void
 }
 
@@ -504,6 +506,8 @@ export default function BookingTable({
   bookings, profiles, currentUserId, currentProfile, customLists,
   pinnedColumns = DEFAULT_PINNED_COLUMNS,
   customColumns = [],
+  regionList = [],
+  customerList = [],
   onSettingsClick,
 }: Props) {
   const router = useRouter()
@@ -528,9 +532,9 @@ export default function BookingTable({
 
   // 동적 COL_DEFS
   const allColDefs = useMemo(() => {
-    const defs: Record<string, { label: string; minW: number }> = { ...BASE_COL_DEFS }
+    const defs: Record<string, { label: string; minW: number; description?: string }> = { ...BASE_COL_DEFS }
     for (const cd of customColumns) {
-      defs[cd.key] = { label: cd.label, minW: 120 }
+      defs[cd.key] = { label: cd.label, minW: 120, description: cd.description || undefined }
     }
     return defs
   }, [customColumns])
@@ -852,9 +856,15 @@ export default function BookingTable({
     })
   }
 
+  // 지역 옵션: 관리자 설정 목록 우선, 없으면 프로필에서 추출
   const regionOptions = useMemo(() =>
-    Array.from(new Set(profiles.map(p => p.region).filter(Boolean))).sort() as string[]
-  , [profiles])
+    regionList.length > 0
+      ? regionList
+      : Array.from(new Set(profiles.map(p => p.region).filter(Boolean))).sort() as string[]
+  , [regionList, profiles])
+
+  // 고객사 옵션: 관리자 설정 목록
+  const customerOptions = customerList
 
   const hasFilter = !!(carrierFilter || handlerFilter || regionFilter || customersFilter || etdFrom || etdTo || docFilter)
   const numCols = colsToRender.length + 1
@@ -1103,9 +1113,17 @@ export default function BookingTable({
               {regionOptions.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
           )}
-          <input value={customersFilter} onChange={e => setCustomersFilter(e.target.value)}
-            placeholder="고객사 검색"
-            className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 w-28" />
+          {customerOptions.length > 0 ? (
+            <select value={customersFilter} onChange={e => setCustomersFilter(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">고객사 전체</option>
+              {customerOptions.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          ) : (
+            <input value={customersFilter} onChange={e => setCustomersFilter(e.target.value)}
+              placeholder="고객사 검색"
+              className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 w-28" />
+          )}
           <div className="flex items-center gap-1 text-xs text-gray-400">
             <span>ETD</span>
             <input type="date" value={etdFrom} onChange={e => setEtdFrom(e.target.value)}
@@ -1235,10 +1253,12 @@ export default function BookingTable({
                   const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs)
                   return (
                     <th key={col}
+                      title={def.description || undefined}
                       className={`table-th select-none transition-colors
                         ${isPinned ? 'sticky z-20 bg-gray-50' : 'cursor-grab active:cursor-grabbing'}
                         ${dragSrc === col ? 'opacity-40' : ''}
                         ${dragOver === col && dragSrc !== col ? 'bg-blue-100 text-blue-700' : ''}
+                        ${def.description ? 'cursor-help' : ''}
                       `}
                       style={{ minWidth: def.minW, ...(fixedLeft !== null ? { left: fixedLeft } : {}) }}
                       draggable={!isPinned}

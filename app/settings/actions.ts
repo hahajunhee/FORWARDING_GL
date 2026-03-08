@@ -82,7 +82,8 @@ export async function saveColumnSettings(
 
 export async function addColumnDefinition(
   label: string,
-  password: string
+  password: string,
+  description: string = '',
 ): Promise<{ error: string | null }> {
   if (password !== '4478') return { error: '비밀번호가 올바르지 않습니다.' }
   const trimmed = label.trim()
@@ -105,6 +106,7 @@ export async function addColumnDefinition(
   const { error } = await supabase.from('column_definitions').insert({
     key,
     label: trimmed,
+    description: description.trim(),
     display_order: nextOrder,
   })
 

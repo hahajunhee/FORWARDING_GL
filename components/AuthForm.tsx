@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 import Link from 'next/link'
 
-const ALLOWED_DOMAIN = 'glovis.net'
-
 interface AuthFormProps {
   mode: 'login' | 'register'
 }
@@ -39,11 +37,6 @@ export default function AuthForm({ mode }: AuthFormProps) {
     } else {
       if (!name.trim()) {
         setError('이름을 입력해주세요.')
-        setLoading(false)
-        return
-      }
-      if (!email.toLowerCase().endsWith(`@${ALLOWED_DOMAIN}`)) {
-        setError(`@${ALLOWED_DOMAIN} 이메일 주소만 가입할 수 있습니다.`)
         setLoading(false)
         return
       }
@@ -166,13 +159,10 @@ export default function AuthForm({ mode }: AuthFormProps) {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder={mode === 'register' ? `you@${ALLOWED_DOMAIN}` : 'you@company.com'}
+              placeholder="you@company.com"
               required
               className="input-field"
             />
-            {mode === 'register' && (
-              <p className="text-xs text-gray-400 mt-1">@{ALLOWED_DOMAIN} 이메일만 가입 가능합니다.</p>
-            )}
           </div>
 
           <div>

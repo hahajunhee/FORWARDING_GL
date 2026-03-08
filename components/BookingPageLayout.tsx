@@ -20,6 +20,8 @@ interface Props {
   customLists: CustomList[]
   customColumns: ColumnDefinition[]
   initialScheduleCols: string[] | null
+  regionList: string[]
+  customerList: string[]
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -62,6 +64,7 @@ const MASTER_EMAIL = 'hahajunhee@glovis.net'
 
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns, initialScheduleCols,
+  regionList, customerList,
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -180,6 +183,8 @@ export default function BookingPageLayout({
               customLists={customLists}
               pinnedColumns={pinnedColumns}
               customColumns={customColumns}
+              regionList={regionList}
+              customerList={customerList}
             />
           )}
           {activeTab === 'doc_cutoff' && (

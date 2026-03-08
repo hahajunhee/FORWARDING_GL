@@ -17,6 +17,8 @@ export default async function BookingsPage() {
     { data: customLists },
     { data: columnDefinitions },
     { data: scheduleSettings },
+    { data: regionSetting },
+    { data: customerSetting },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -27,6 +29,8 @@ export default async function BookingsPage() {
     supabase.from('custom_lists').select('*').order('sort_order').order('created_at'),
     supabase.from('column_definitions').select('*').order('display_order').order('created_at'),
     supabase.from('global_settings').select('value').eq('key', 'schedule_cols').single(),
+    supabase.from('global_settings').select('value').eq('key', 'region_list').single(),
+    supabase.from('global_settings').select('value').eq('key', 'customer_list').single(),
   ])
 
   return (
@@ -39,6 +43,8 @@ export default async function BookingsPage() {
       customLists={(customLists || []) as CustomList[]}
       customColumns={(columnDefinitions || []) as ColumnDefinition[]}
       initialScheduleCols={(scheduleSettings?.value as string[]) || null}
+      regionList={(regionSetting?.value as string[] | null) || []}
+      customerList={(customerSetting?.value as string[] | null) || []}
     />
   )
 }

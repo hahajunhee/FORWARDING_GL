@@ -13,15 +13,24 @@ export default async function AdminPage() {
   if (!user) redirect('/login')
   if (user.email !== MASTER_EMAIL) redirect('/bookings')
 
-  const [{ data: profiles }, { data: inviteSetting }] = await Promise.all([
+  const [
+    { data: profiles },
+    { data: inviteSetting },
+    { data: regionSetting },
+    { data: customerSetting },
+  ] = await Promise.all([
     supabase.from('profiles').select('*').order('created_at'),
     supabase.from('global_settings').select('value').eq('key', 'invite_code').single(),
+    supabase.from('global_settings').select('value').eq('key', 'region_list').single(),
+    supabase.from('global_settings').select('value').eq('key', 'customer_list').single(),
   ])
 
   return (
     <AdminClient
       profiles={(profiles || []) as Profile[]}
       currentInviteCode={(inviteSetting?.value as string | null) || ''}
+      regionList={(regionSetting?.value as string[] | null) || []}
+      customerList={(customerSetting?.value as string[] | null) || []}
     />
   )
 }

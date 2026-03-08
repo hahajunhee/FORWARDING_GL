@@ -153,6 +153,7 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions }: Colum
 
   // 커스텀 열 관리
   const [newColLabel, setNewColLabel] = useState('')
+  const [newColDescription, setNewColDescription] = useState('')
   const [colPassword, setColPassword] = useState('')
   const [colError, setColError] = useState<string | null>(null)
   const [colSuccess, setColSuccess] = useState<string | null>(null)
@@ -200,12 +201,12 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions }: Colum
     if (!newColLabel.trim()) { setColError('열 이름을 입력해주세요.'); return }
     setColError(null); setColSuccess(null)
     startTransition(async () => {
-      const result = await addColumnDefinition(newColLabel, colPassword)
+      const result = await addColumnDefinition(newColLabel, colPassword, newColDescription)
       if (result.error) {
         setColError(result.error)
       } else {
         setColSuccess(`"${newColLabel}" 열이 추가되었습니다.`)
-        setNewColLabel(''); setColPassword(''); setShowAddForm(false)
+        setNewColLabel(''); setNewColDescription(''); setColPassword(''); setShowAddForm(false)
         setTimeout(() => setColSuccess(null), 3000)
       }
     })
@@ -322,13 +323,16 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions }: Colum
         {showAddForm && (
           <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 space-y-3">
             <p className="text-xs font-medium text-purple-800">새 열 추가 (전체 사용자 적용)</p>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <input type="text" value={newColLabel} onChange={e => setNewColLabel(e.target.value)}
                 placeholder="열 이름 (예: 화주명)"
-                className="flex-1 border border-purple-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white" />
+                className="flex-1 min-w-[120px] border border-purple-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white" />
+              <input type="text" value={newColDescription} onChange={e => setNewColDescription(e.target.value)}
+                placeholder="열 설명 (마우스 오버시 표시)"
+                className="flex-[2] min-w-[180px] border border-purple-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white" />
               <input type="password" value={colPassword} onChange={e => setColPassword(e.target.value)}
                 placeholder="비밀번호"
-                className="w-32 border border-purple-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white" />
+                className="w-28 border border-purple-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 bg-white" />
               <button onClick={handleAddCol} disabled={isPending}
                 className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors">
                 추가
@@ -363,7 +367,10 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions }: Colum
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span className="flex-1 text-sm text-gray-800 font-medium">{cd.label}</span>
+                    <div className="flex-1">
+                      <span className="text-sm text-gray-800 font-medium">{cd.label}</span>
+                      {cd.description && <p className="text-xs text-gray-400 mt-0.5">{cd.description}</p>}
+                    </div>
                     <span className="text-xs text-gray-400 font-mono">{cd.key}</span>
                     <button onClick={() => { setRemovingId(cd.id); setRemoveError(null) }}
                       className="text-xs px-2 py-1 text-red-500 hover:bg-red-50 rounded transition-colors">삭제</button>
@@ -389,11 +396,14 @@ interface SettingsClientProps {
   currentName: string
   currentRegion: string
   currentCustomers: string
+  regionList: string[]
+  customerList: string[]
 }
 
 export default function SettingsClient({
   customLists, columnOrder, pinnedColumns, columnDefinitions,
   currentName, currentRegion, currentCustomers,
+  regionList, customerList,
 }: SettingsClientProps) {
   const [mainTab, setMainTab] = useState<MainTab>('lists')
 
@@ -523,26 +533,56 @@ export default function SettingsClient({
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">담당지역</label>
-                <input
-                  type="text"
-                  value={profileRegion}
-                  onChange={e => setProfileRegion(e.target.value)}
-                  placeholder="예: 북미, 아태, 유럽, 중남미"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-xs text-gray-400 mt-1">담당하는 지역을 입력하세요. 부킹장 필터에서 지역별로 조회할 수 있습니다.</p>
+                {regionList.length > 0 ? (
+                  <select
+                    value={profileRegion}
+                    onChange={e => setProfileRegion(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">지역 선택</option>
+                    {regionList.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={profileRegion}
+                    onChange={e => setProfileRegion(e.target.value)}
+                    placeholder="예: 북미, 아태, 유럽, 중남미"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                )}
+                <p className="text-xs text-gray-400 mt-1">담당하는 지역을 선택하세요. 부킹장 필터에서 지역별로 조회할 수 있습니다.</p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">담당고객사</label>
-                <textarea
-                  value={profileCustomers}
-                  onChange={e => setProfileCustomers(e.target.value)}
-                  placeholder="예: 모비스AS, TPL, 현대글로비스"
-                  rows={3}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                />
-                <p className="text-xs text-gray-400 mt-1">담당 고객사를 입력하세요. 쉼표로 구분하면 검색이 더 편리합니다.</p>
+                {customerList.length > 0 ? (
+                  <div className="border border-gray-200 rounded-lg p-3 space-y-1.5 max-h-48 overflow-y-auto">
+                    {customerList.map(c => {
+                      const checked = profileCustomers.split(',').map(s => s.trim()).includes(c)
+                      const handleCheck = (v: boolean) => {
+                        const current = profileCustomers.split(',').map(s => s.trim()).filter(Boolean)
+                        const next = v ? [...current, c] : current.filter(x => x !== c)
+                        setProfileCustomers(next.join(', '))
+                      }
+                      return (
+                        <label key={c} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 rounded px-1 py-0.5">
+                          <input type="checkbox" checked={checked} onChange={e => handleCheck(e.target.checked)}
+                            className="rounded text-blue-600 focus:ring-blue-500" />
+                          <span className="text-sm text-gray-700">{c}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <textarea
+                    value={profileCustomers}
+                    onChange={e => setProfileCustomers(e.target.value)}
+                    placeholder="예: 모비스AS, TPL, 현대글로비스"
+                    rows={3}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  />
+                )}
+                <p className="text-xs text-gray-400 mt-1">담당 고객사를 선택하세요. 부킹장 필터에서 조회할 수 있습니다.</p>
               </div>
             </div>
 

@@ -42,6 +42,36 @@ export async function deleteUser(userId: string): Promise<{ error: string | null
   return { error: null }
 }
 
+export async function updateRegionList(list: string[]): Promise<{ error: string | null }> {
+  const master = await getMasterUser()
+  if (!master) return { error: '권한이 없습니다.' }
+
+  const { error } = await master.supabase
+    .from('global_settings')
+    .upsert({ key: 'region_list', value: list })
+
+  if (error) return { error: error.message }
+  revalidatePath('/admin')
+  revalidatePath('/bookings')
+  revalidatePath('/settings')
+  return { error: null }
+}
+
+export async function updateCustomerList(list: string[]): Promise<{ error: string | null }> {
+  const master = await getMasterUser()
+  if (!master) return { error: '권한이 없습니다.' }
+
+  const { error } = await master.supabase
+    .from('global_settings')
+    .upsert({ key: 'customer_list', value: list })
+
+  if (error) return { error: error.message }
+  revalidatePath('/admin')
+  revalidatePath('/bookings')
+  revalidatePath('/settings')
+  return { error: null }
+}
+
 export async function updateInviteCode(newCode: string): Promise<{ error: string | null }> {
   const master = await getMasterUser()
   if (!master) return { error: '권한이 없습니다.' }
