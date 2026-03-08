@@ -5,7 +5,7 @@ import Link from 'next/link'
 import {
   addCustomListItem, deleteCustomListItem, updateCustomListItem,
   saveColumnSettings, addColumnDefinition, removeColumnDefinition,
-  saveCustomListOrder, saveMyProfile,
+  saveCustomListOrder, saveMyProfile, updateColumnDescription, saveBaseColDescriptions,
 } from './actions'
 import type { CustomList, ColumnDefinition } from '@/types'
 import { DEFAULT_DESTINATIONS, MAJOR_PORTS, CARRIERS, DEFAULT_COLUMN_ORDER, COLUMN_LABELS } from '@/types'
@@ -137,9 +137,10 @@ interface ColumnSettingsProps {
   columnOrder: string[]
   pinnedColumns: string[]
   columnDefinitions: ColumnDefinition[]
+  baseColDescriptions: Record<string, string>
 }
 
-function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions }: ColumnSettingsProps) {
+function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseColDescriptions }: ColumnSettingsProps) {
   const [cols, setCols] = useState<string[]>(() => {
     const customKeys = columnDefinitions.map(cd => cd.key)
     const allKeys = [...DEFAULT_COLUMN_ORDER, ...customKeys]
@@ -150,6 +151,30 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions }: Colum
   const [pinned, setPinned] = useState<string[]>(pinnedColumns)
   const [isPending, startTransition] = useTransition()
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle')
+
+  // 기본 열 설명
+  const [baseDescs, setBaseDescs] = useState<Record<string, string>>(baseColDescriptions)
+  const [baseDescSaving, setBaseDescSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
+
+  const handleSaveBaseDescs = () => {
+    setBaseDescSaving('saving')
+    startTransition(async () => {
+      await saveBaseColDescriptions(baseDescs)
+      setBaseDescSaving('saved')
+      setTimeout(() => setBaseDescSaving('idle'), 2000)
+    })
+  }
+
+  // 커스텀 열 설명 인라인 편집
+  const [editingDescId, setEditingDescId] = useState<string | null>(null)
+  const [editingDescValue, setEditingDescValue] = useState('')
+
+  const handleSaveDesc = (id: string) => {
+    startTransition(async () => {
+      await updateColumnDescription(id, editingDescValue)
+      setEditingDescId(null)
+    })
+  }
 
   // 커스텀 열 관리
   const [newColLabel, setNewColLabel] = useState('')
@@ -303,6 +328,34 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions }: Colum
         )}
       </div>
 
+      {/* 기본 열 설명 */}
+      <div className="border-t border-gray-200 pt-6 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">기본 열 설명</h3>
+            <p className="text-xs text-gray-500 mt-0.5">부킹장 열 제목에 마우스를 올리면 표시되는 설명을 입력합니다.</p>
+          </div>
+          <button onClick={handleSaveBaseDescs} disabled={isPending || baseDescSaving === 'saving'}
+            className="text-xs px-3 py-1.5 bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 transition-colors font-medium">
+            {baseDescSaving === 'saving' ? '저장 중...' : baseDescSaving === 'saved' ? '✓ 저장됨' : '저장'}
+          </button>
+        </div>
+        <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          {DEFAULT_COLUMN_ORDER.map(key => (
+            <div key={key} className="flex items-center gap-3 px-3 py-2">
+              <span className="text-sm text-gray-700 font-medium w-28 shrink-0">{COLUMN_LABELS[key] || key}</span>
+              <input
+                type="text"
+                value={baseDescs[key] || ''}
+                onChange={e => setBaseDescs(prev => ({ ...prev, [key]: e.target.value }))}
+                placeholder="설명 없음"
+                className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400 text-gray-600"
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* 커스텀 열 관리 */}
       <div className="border-t border-gray-200 pt-6 space-y-4">
         <div className="flex items-center justify-between">
@@ -367,13 +420,33 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions }: Colum
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <span className="text-sm text-gray-800 font-medium">{cd.label}</span>
-                      {cd.description && <p className="text-xs text-gray-400 mt-0.5">{cd.description}</p>}
+                      {editingDescId === cd.id ? (
+                        <div className="flex items-center gap-1 mt-1">
+                          <input
+                            autoFocus
+                            value={editingDescValue}
+                            onChange={e => setEditingDescValue(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') handleSaveDesc(cd.id); if (e.key === 'Escape') setEditingDescId(null) }}
+                            placeholder="열 설명 (마우스 오버시 표시)"
+                            className="flex-1 text-xs border border-blue-300 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          />
+                          <button onClick={() => handleSaveDesc(cd.id)} className="text-xs px-2 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700">저장</button>
+                          <button onClick={() => setEditingDescId(null)} className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded hover:bg-gray-200">취소</button>
+                        </div>
+                      ) : (
+                        <p
+                          className="text-xs text-gray-400 mt-0.5 cursor-pointer hover:text-blue-500"
+                          onClick={() => { setEditingDescId(cd.id); setEditingDescValue(cd.description || '') }}
+                          title="클릭하여 설명 편집">
+                          {cd.description || <span className="text-gray-300 italic">설명 없음 (클릭하여 추가)</span>}
+                        </p>
+                      )}
                     </div>
-                    <span className="text-xs text-gray-400 font-mono">{cd.key}</span>
+                    <span className="text-xs text-gray-400 font-mono shrink-0">{cd.key}</span>
                     <button onClick={() => { setRemovingId(cd.id); setRemoveError(null) }}
-                      className="text-xs px-2 py-1 text-red-500 hover:bg-red-50 rounded transition-colors">삭제</button>
+                      className="text-xs px-2 py-1 text-red-500 hover:bg-red-50 rounded transition-colors shrink-0">삭제</button>
                   </div>
                 )}
               </div>
@@ -398,12 +471,13 @@ interface SettingsClientProps {
   currentCustomers: string
   regionList: string[]
   customerList: string[]
+  baseColDescriptions: Record<string, string>
 }
 
 export default function SettingsClient({
   customLists, columnOrder, pinnedColumns, columnDefinitions,
   currentName, currentRegion, currentCustomers,
-  regionList, customerList,
+  regionList, customerList, baseColDescriptions,
 }: SettingsClientProps) {
   const [mainTab, setMainTab] = useState<MainTab>('lists')
 
@@ -508,6 +582,7 @@ export default function SettingsClient({
               columnOrder={columnOrder}
               pinnedColumns={pinnedColumns}
               columnDefinitions={columnDefinitions}
+              baseColDescriptions={baseColDescriptions}
             />
           </div>
         )}

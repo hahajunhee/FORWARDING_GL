@@ -517,6 +517,7 @@ interface Props {
   customColumns?: ColumnDefinition[]
   regionList?: string[]
   customerList?: string[]
+  baseColDescriptions?: Record<string, string>
   onSettingsClick?: () => void
 }
 
@@ -526,6 +527,7 @@ export default function BookingTable({
   customColumns = [],
   regionList = [],
   customerList = [],
+  baseColDescriptions = {},
   onSettingsClick,
 }: Props) {
   const router = useRouter()
@@ -548,14 +550,17 @@ export default function BookingTable({
     ...customColumns.map(c => c.key),
   ], [customColumns])
 
-  // 동적 COL_DEFS
+  // 동적 COL_DEFS (기본 열 설명 병합)
   const allColDefs = useMemo(() => {
-    const defs: Record<string, { label: string; minW: number; description?: string }> = { ...BASE_COL_DEFS }
+    const defs: Record<string, { label: string; minW: number; description?: string }> = {}
+    for (const [k, v] of Object.entries(BASE_COL_DEFS)) {
+      defs[k] = { ...v, description: baseColDescriptions[k] || undefined }
+    }
     for (const cd of customColumns) {
       defs[cd.key] = { label: cd.label, minW: 120, description: cd.description || undefined }
     }
     return defs
-  }, [customColumns])
+  }, [customColumns, baseColDescriptions])
 
   const [colOrder, setColOrder] = useState<string[]>(() =>
     normalizeColOrder(currentProfile?.column_order, allColKeys)
@@ -1075,7 +1080,7 @@ export default function BookingTable({
   const editBtnLabel = bulkSaving ? '저장 중...' : editMode ? '편집 OFF (저장)' : '편집'
 
   return (
-    <div className="flex flex-col h-full min-h-0 gap-3">
+    <div className="flex-1 flex flex-col min-h-0 gap-3">
       {/* 유효성 검사 모달 */}
       {validationErrors.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setValidationErrors([])}>

@@ -194,6 +194,46 @@ export async function saveMyProfile(
   return { error: null }
 }
 
+// ── 커스텀 열 설명 수정 ──────────────────────────────────────────────
+
+export async function updateColumnDescription(
+  id: string,
+  description: string,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('column_definitions')
+    .update({ description: description.trim() })
+    .eq('id', id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  revalidatePath('/settings')
+  return { error: null }
+}
+
+// ── 기본 열 설명 저장 (global_settings) ─────────────────────────────
+
+export async function saveBaseColDescriptions(
+  descriptions: Record<string, string>,
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'base_col_descriptions', value: descriptions })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  revalidatePath('/settings')
+  return { error: null }
+}
+
 // ── 내 담당자 색상 저장 ─────────────────────────────────────────────
 
 export async function saveMyColor(color: string): Promise<{ error: string | null }> {

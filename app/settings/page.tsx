@@ -17,12 +17,14 @@ export default async function SettingsPage() {
     { data: columnDefinitions },
     { data: regionSetting },
     { data: customerSetting },
+    { data: baseDescSetting },
   ] = await Promise.all([
     supabase.from('custom_lists').select('*').order('list_type').order('sort_order').order('created_at'),
     supabase.from('profiles').select('*').eq('id', user.id).single(),
     supabase.from('column_definitions').select('*').order('display_order').order('created_at'),
     supabase.from('global_settings').select('value').eq('key', 'region_list').single(),
     supabase.from('global_settings').select('value').eq('key', 'customer_list').single(),
+    supabase.from('global_settings').select('value').eq('key', 'base_col_descriptions').single(),
   ])
 
   const profile = currentProfile as Profile | null
@@ -39,6 +41,7 @@ export default async function SettingsPage() {
       currentCustomers={profile?.customers || ''}
       regionList={(regionSetting?.value as string[] | null) || []}
       customerList={(customerSetting?.value as string[] | null) || []}
+      baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}
     />
   )
 }
