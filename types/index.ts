@@ -20,6 +20,9 @@ export interface Profile {
   pinned_columns: string[] | null
   doc_template: string | null
   color: string | null
+  region: string | null
+  customers: string | null
+  is_active: boolean | null
   created_at: string
 }
 
@@ -95,6 +98,8 @@ export const DEFAULT_COLUMN_ORDER = [
   'mqc',
   'customer_doc_handler',
   'forwarder_handler',
+  'handler_region',
+  'handler_customers',
   'doc_cutoff_date',
   'proforma_etd',
   'updated_etd',
@@ -115,6 +120,8 @@ export const COLUMN_LABELS: Record<string, string> = {
   mqc:                  'MQC',
   customer_doc_handler: '고객사 서류',
   forwarder_handler:    '포워더 담당',
+  handler_region:       '담당지역',
+  handler_customers:    '담당고객사',
   doc_cutoff_date:      '서류마감',
   proforma_etd:         'PROFORMA ETD',
   updated_etd:          'UPDATED ETD',

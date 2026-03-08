@@ -167,6 +167,31 @@ export async function saveGlobalScheduleCols(
   return { error: null }
 }
 
+// ── 내 프로필 정보 저장 (이름, 지역, 고객사) ────────────────────────
+
+export async function saveMyProfile(
+  name: string,
+  region: string,
+  customers: string,
+): Promise<{ error: string | null }> {
+  const trimmed = name.trim()
+  if (!trimmed) return { error: '이름을 입력해주세요.' }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('profiles')
+    .update({ name: trimmed, region: region.trim(), customers: customers.trim() })
+    .eq('id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  revalidatePath('/settings')
+  return { error: null }
+}
+
 // ── 내 담당자 색상 저장 ─────────────────────────────────────────────
 
 export async function saveMyColor(color: string): Promise<{ error: string | null }> {

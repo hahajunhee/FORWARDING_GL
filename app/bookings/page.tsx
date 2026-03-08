@@ -34,6 +34,7 @@ export default async function BookingsPage() {
       bookings={(bookings || []) as Booking[]}
       profiles={(profiles || []) as Profile[]}
       currentUserId={user.id}
+      currentUserEmail={user.email || ''}
       currentProfile={currentProfile as Profile}
       customLists={(customLists || []) as CustomList[]}
       customColumns={(columnDefinitions || []) as ColumnDefinition[]}

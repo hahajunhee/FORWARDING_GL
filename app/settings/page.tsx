@@ -21,13 +21,18 @@ export default async function SettingsPage() {
     supabase.from('column_definitions').select('*').order('display_order').order('created_at'),
   ])
 
+  const profile = currentProfile as Profile | null
+
   return (
     <SettingsClient
       customLists={(customLists || []) as CustomList[]}
-      columnOrder={(currentProfile as Profile)?.column_order || DEFAULT_COLUMN_ORDER}
-      pinnedColumns={(currentProfile as Profile)?.pinned_columns || DEFAULT_PINNED_COLUMNS}
+      columnOrder={profile?.column_order || DEFAULT_COLUMN_ORDER}
+      pinnedColumns={profile?.pinned_columns || DEFAULT_PINNED_COLUMNS}
       columnDefinitions={(columnDefinitions || []) as ColumnDefinition[]}
-      currentColor={(currentProfile as Profile)?.color || null}
+      currentColor={profile?.color || null}
+      currentName={profile?.name || ''}
+      currentRegion={profile?.region || ''}
+      currentCustomers={profile?.customers || ''}
     />
   )
 }

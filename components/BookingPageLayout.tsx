@@ -15,6 +15,7 @@ interface Props {
   bookings: Booking[]
   profiles: Profile[]
   currentUserId: string
+  currentUserEmail: string
   currentProfile: Profile | null
   customLists: CustomList[]
   customColumns: ColumnDefinition[]
@@ -57,9 +58,12 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
   },
 ]
 
+const MASTER_EMAIL = 'hahajunhee@glovis.net'
+
 export default function BookingPageLayout({
-  bookings, profiles, currentUserId, currentProfile, customLists, customColumns, initialScheduleCols,
+  bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns, initialScheduleCols,
 }: Props) {
+  const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
 
   const pinnedColumns = currentProfile?.pinned_columns || DEFAULT_PINNED_COLUMNS
@@ -93,6 +97,16 @@ export default function BookingPageLayout({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {isMaster && (
+              <Link href="/admin"
+                className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                title="관리자">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+              </Link>
+            )}
             <Link href="/settings"
               className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               title="설정">

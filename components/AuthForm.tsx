@@ -18,6 +18,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,6 +49,24 @@ export default function AuthForm({ mode }: AuthFormProps) {
       }
       if (password.length < 6) {
         setError('비밀번호는 6자 이상이어야 합니다.')
+        setLoading(false)
+        return
+      }
+      if (!inviteCode.trim()) {
+        setError('초대코드를 입력해주세요.')
+        setLoading(false)
+        return
+      }
+
+      // 초대코드 서버 검증
+      const { data: setting } = await supabase
+        .from('global_settings')
+        .select('value')
+        .eq('key', 'invite_code')
+        .single()
+      const validCode = (setting?.value as string | null) || ''
+      if (inviteCode.trim() !== validCode) {
+        setError('초대코드가 올바르지 않습니다.')
         setLoading(false)
         return
       }
@@ -124,6 +143,21 @@ export default function AuthForm({ mode }: AuthFormProps) {
                 />
               </div>
             </>
+          )}
+
+          {mode === 'register' && (
+            <div>
+              <label className="label">초대코드 *</label>
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                placeholder="초대코드를 입력하세요"
+                required
+                className="input-field"
+              />
+              <p className="text-xs text-gray-400 mt-1">관리자에게 초대코드를 받으세요.</p>
+            </div>
           )}
 
           <div>

@@ -10,7 +10,8 @@ import { deleteBooking, saveBookingRow, saveColumnOrder } from '@/app/bookings/a
 
 // 정렬과 무관하게 항상 시각적 병합할 열
 const ALWAYS_MERGE_COLS = new Set([
-  'forwarder_handler', 'customer_doc_handler', 'final_destination', 'discharge_port', 'carrier',
+  'forwarder_handler', 'handler_region', 'handler_customers',
+  'customer_doc_handler', 'final_destination', 'discharge_port', 'carrier',
 ])
 
 // ── 기본 열 정의 ───────────────────────────────────────────────────
@@ -25,6 +26,8 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   mqc:                  { label: 'MQC',             minW: 80  },
   customer_doc_handler: { label: '고객사 서류',     minW: 110 },
   forwarder_handler:    { label: '포워더 담당',     minW: 100 },
+  handler_region:       { label: '담당지역',        minW: 90  },
+  handler_customers:    { label: '담당고객사',      minW: 110 },
   doc_cutoff_date:      { label: '서류마감',        minW: 100 },
   proforma_etd:         { label: 'PROFORMA ETD',    minW: 110 },
   updated_etd:          { label: 'UPDATED ETD',     minW: 110 },
@@ -124,6 +127,8 @@ function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]
     case 'mqc': return b.mqc || ''
     case 'customer_doc_handler': return b.customer_doc_handler || ''
     case 'forwarder_handler': return b.forwarder_handler?.name || ''
+    case 'handler_region': return b.forwarder_handler?.region || ''
+    case 'handler_customers': return b.forwarder_handler?.customers || ''
     case 'doc_cutoff_date': return b.doc_cutoff_date || ''
     case 'proforma_etd': return b.proforma_etd || ''
     case 'updated_etd': return b.updated_etd || ''
@@ -273,9 +278,9 @@ function BookingEntriesEditor({ entries, onChange }: {
 
 // ── 자동완성 입력 ─────────────────────────────────────────────────
 
-function AutocompleteInput({ value, options, onChange, placeholder, className }: {
+function AutocompleteInput({ value, options, onChange, placeholder, className, autoFocus }: {
   value: string; options: string[]; onChange: (v: string) => void
-  placeholder?: string; className?: string
+  placeholder?: string; className?: string; autoFocus?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const filtered = value
@@ -286,6 +291,7 @@ function AutocompleteInput({ value, options, onChange, placeholder, className }:
       <input
         className={className}
         value={value}
+        autoFocus={autoFocus}
         onChange={e => { onChange(e.target.value); setOpen(true) }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
@@ -308,13 +314,14 @@ function AutocompleteInput({ value, options, onChange, placeholder, className }:
 
 // ── 편집 셀 ───────────────────────────────────────────────────────
 
-function EditCell({ colKey, row, profiles, destinations, ports, carriers, customColumns, onChange }: {
+function EditCell({ colKey, row, profiles, destinations, ports, carriers, customColumns, onChange, autoFocus }: {
   colKey: string; row: Partial<Booking>; profiles: Profile[]
   destinations: string[]; ports: string[]; carriers: string[]
   customColumns: ColumnDefinition[]
   onChange: (c: Partial<Booking>) => void
+  autoFocus?: boolean
 }) {
-  const cls = "w-full border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none focus:border-blue-400"
+  const cls = "w-full h-full border-0 px-1.5 py-1 text-xs bg-transparent focus:outline-none"
   switch (colKey) {
     case 'booking_no': {
       const entries: BookingEntry[] = (row.booking_entries as BookingEntry[] | undefined) ||
@@ -330,37 +337,40 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
       )
     }
     case 'final_destination':
-      return <AutocompleteInput className={cls} value={row.final_destination || ''} options={destinations} onChange={v => onChange({ final_destination: v })} placeholder="최종도착지" />
+      return <AutocompleteInput className={cls} value={row.final_destination || ''} options={destinations} onChange={v => onChange({ final_destination: v })} placeholder="최종도착지" autoFocus={autoFocus} />
     case 'discharge_port':
-      return <AutocompleteInput className={cls} value={row.discharge_port || ''} options={ports} onChange={v => onChange({ discharge_port: v })} placeholder="양하항" />
+      return <AutocompleteInput className={cls} value={row.discharge_port || ''} options={ports} onChange={v => onChange({ discharge_port: v })} placeholder="양하항" autoFocus={autoFocus} />
     case 'carrier':
-      return <select className={cls} value={row.carrier || ''} onChange={e => onChange({ carrier: e.target.value })}>
+      return <select className={cls} autoFocus={autoFocus} value={row.carrier || ''} onChange={e => onChange({ carrier: e.target.value })}>
         <option value="">-</option>{carriers.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
     case 'vessel_name':
-      return <input className={`${cls} uppercase`} value={row.vessel_name || ''} onChange={e => onChange({ vessel_name: e.target.value })} placeholder="모선명" />
+      return <input autoFocus={autoFocus} className={`${cls} uppercase`} value={row.vessel_name || ''} onChange={e => onChange({ vessel_name: e.target.value })} placeholder="모선명" />
     case 'secured_space':
-      return <input className={cls} value={row.secured_space || ''} onChange={e => onChange({ secured_space: e.target.value })} placeholder="확보선복" />
+      return <input autoFocus={autoFocus} className={cls} value={row.secured_space || ''} onChange={e => onChange({ secured_space: e.target.value })} placeholder="확보선복" />
     case 'mqc':
-      return <input className={cls} value={row.mqc || ''} onChange={e => onChange({ mqc: e.target.value })} placeholder="MQC" />
+      return <input autoFocus={autoFocus} className={cls} value={row.mqc || ''} onChange={e => onChange({ mqc: e.target.value })} placeholder="MQC" />
     case 'customer_doc_handler':
-      return <input className={cls} value={row.customer_doc_handler || ''} onChange={e => onChange({ customer_doc_handler: e.target.value })} placeholder="서류담당" />
+      return <input autoFocus={autoFocus} className={cls} value={row.customer_doc_handler || ''} onChange={e => onChange({ customer_doc_handler: e.target.value })} placeholder="서류담당" />
     case 'forwarder_handler':
-      return <select className={cls} value={row.forwarder_handler_id || ''} onChange={e => onChange({ forwarder_handler_id: e.target.value || null })}>
+      return <select autoFocus={autoFocus} className={cls} value={row.forwarder_handler_id || ''} onChange={e => onChange({ forwarder_handler_id: e.target.value || null })}>
         <option value="">미지정</option>{profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
     case 'doc_cutoff_date':
-      return <input type="date" className={cls} value={row.doc_cutoff_date || ''} onChange={e => onChange({ doc_cutoff_date: e.target.value || null })} />
+      return <input autoFocus={autoFocus} type="date" className={cls} value={row.doc_cutoff_date || ''} onChange={e => onChange({ doc_cutoff_date: e.target.value || null })} />
     case 'proforma_etd':
-      return <input type="date" className={cls} value={row.proforma_etd || ''} onChange={e => onChange({ proforma_etd: e.target.value || null })} />
+      return <input autoFocus={autoFocus} type="date" className={cls} value={row.proforma_etd || ''} onChange={e => onChange({ proforma_etd: e.target.value || null })} />
     case 'updated_etd':
-      return <input type="date" className={cls} value={row.updated_etd || ''} onChange={e => onChange({ updated_etd: e.target.value || null })} />
+      return <input autoFocus={autoFocus} type="date" className={cls} value={row.updated_etd || ''} onChange={e => onChange({ updated_etd: e.target.value || null })} />
     case 'eta':
-      return <input type="date" className={cls} value={row.eta || ''} onChange={e => onChange({ eta: e.target.value || null })} />
+      return <input autoFocus={autoFocus} type="date" className={cls} value={row.eta || ''} onChange={e => onChange({ eta: e.target.value || null })} />
+    case 'handler_region':
+    case 'handler_customers':
+      return <span className="text-xs text-gray-400 italic px-1.5">담당자 설정에서 변경</span>
     case 'containers':
-      return <span className="text-xs text-gray-400 italic">부킹번호 열에서 편집</span>
+      return <span className="text-xs text-gray-400 italic px-1.5">부킹번호 열에서 편집</span>
     case 'remarks':
-      return <input className={cls} value={row.remarks || ''} onChange={e => onChange({ remarks: e.target.value })} placeholder="비고" />
+      return <input autoFocus={autoFocus} className={cls} value={row.remarks || ''} onChange={e => onChange({ remarks: e.target.value })} placeholder="비고" />
     default: {
       const cd = customColumns.find(c => c.key === colKey)
       if (cd) {
@@ -415,6 +425,10 @@ function ViewCell({ colKey, booking, currentUserId, customColumns }: {
           {booking.forwarder_handler?.name || '-'}
         </span>
       )
+    case 'handler_region':
+      return <span className="text-xs text-gray-600">{booking.forwarder_handler?.region || '-'}</span>
+    case 'handler_customers':
+      return <span className="text-xs text-gray-600">{booking.forwarder_handler?.customers || '-'}</span>
     case 'doc_cutoff_date': {
       const dc = getDocClass(booking.doc_cutoff_date)
       const dl = getDayLabel(booking.doc_cutoff_date)
@@ -533,10 +547,13 @@ export default function BookingTable({
   const [viewMode, _setViewMode] = useState<'all' | 'mine'>('all')
   const [carrierFilter, _setCarrierFilter] = useState('')
   const [handlerFilter, _setHandlerFilter] = useState('')
+  const [regionFilter, _setRegionFilter] = useState('')
+  const [customersFilter, _setCustomersFilter] = useState('')
   const [etdFrom, _setEtdFrom] = useState('')
   const [etdTo, _setEtdTo] = useState('')
   const [docFilter, _setDocFilter] = useState(false)
   const [mergeEnabled, _setMergeEnabled] = useState(true)
+  const [activeCell, setActiveCell] = useState<{ id: string; col: string } | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<{ field: string; value: string }[]>([])
 
@@ -553,6 +570,10 @@ export default function BookingTable({
       if (ef) _setEtdFrom(ef)
       const et = localStorage.getItem('bk_etdTo')
       if (et) _setEtdTo(et)
+      const rf = localStorage.getItem('bk_regionFilter')
+      if (rf) _setRegionFilter(rf)
+      const cusf = localStorage.getItem('bk_customersFilter')
+      if (cusf) _setCustomersFilter(cusf)
       if (localStorage.getItem('bk_monthView') === 'true') _setMonthView(true)
       if (localStorage.getItem('bk_mergeEnabled') === 'false') _setMergeEnabled(false)
       const storedSorts = localStorage.getItem('bk_sorts')
@@ -581,6 +602,8 @@ export default function BookingTable({
       return next
     })
   }
+  const setRegionFilter = (v: string) => { _setRegionFilter(v); ls('bk_regionFilter', v) }
+  const setCustomersFilter = (v: string) => { _setCustomersFilter(v); ls('bk_customersFilter', v) }
   const setMergeEnabled = (v: boolean) => { _setMergeEnabled(v); ls('bk_mergeEnabled', String(v)) }
   const setSorts = (updater: SortItem[] | ((p: SortItem[]) => SortItem[])) => {
     _setSorts(prev => {
@@ -621,6 +644,8 @@ export default function BookingTable({
       if (viewMode === 'mine' && b.forwarder_handler_id !== currentUserId) return false
       if (carrierFilter && b.carrier !== carrierFilter) return false
       if (handlerFilter && b.forwarder_handler_id !== handlerFilter) return false
+      if (regionFilter && b.forwarder_handler?.region !== regionFilter) return false
+      if (customersFilter && !b.forwarder_handler?.customers?.includes(customersFilter)) return false
       const etd = b.updated_etd || b.proforma_etd
       if (etdFrom && etd && etd < etdFrom) return false
       if (etdTo && etd && etd > etdTo) return false
@@ -645,7 +670,7 @@ export default function BookingTable({
       })
     }
     return result
-  }, [bookings, viewMode, carrierFilter, handlerFilter, etdFrom, etdTo, docFilter, sorts, currentUserId, customColumns])
+  }, [bookings, viewMode, carrierFilter, handlerFilter, regionFilter, customersFilter, etdFrom, etdTo, docFilter, sorts, currentUserId, customColumns])
 
   const monthGroups = useMemo(() => {
     if (!monthView) return null
@@ -827,7 +852,11 @@ export default function BookingTable({
     })
   }
 
-  const hasFilter = !!(carrierFilter || handlerFilter || etdFrom || etdTo || docFilter)
+  const regionOptions = useMemo(() =>
+    Array.from(new Set(profiles.map(p => p.region).filter(Boolean))).sort() as string[]
+  , [profiles])
+
+  const hasFilter = !!(carrierFilter || handlerFilter || regionFilter || customersFilter || etdFrom || etdTo || docFilter)
   const numCols = colsToRender.length + 1
 
   const d3Count = useMemo(() => bookings.filter(b => {
@@ -887,28 +916,33 @@ export default function BookingTable({
 
           const tdIsGroupStart = isMergedSpan ? true : isGroupStart
           const tdIsGroupEnd = isMergedSpan ? true : isGroupEnd
+          const isActive = editMode && activeCell?.id === booking.id && activeCell?.col === col
 
           return (
             <td key={col}
               rowSpan={rowSpan}
-              onClick={!editMode && isDocCol && booking.doc_cutoff_date ? () => setDocFilter(v => !v) : undefined}
+              onClick={editMode
+                ? () => setActiveCell({ id: booking.id, col })
+                : (!editMode && isDocCol && booking.doc_cutoff_date ? () => setDocFilter(v => !v) : undefined)
+              }
               className={`table-td text-xs
                 ${isPinned ? 'sticky z-10 bg-white' : ''}
                 ${dragOver === col && dragSrc !== col ? 'bg-blue-50' : ''}
                 ${!editMode && isDocCol && booking.doc_cutoff_date ? 'cursor-pointer hover:bg-red-50' : ''}
+                ${editMode ? 'p-0.5 cursor-pointer' : ''}
               `}
               style={{
                 minWidth: def.minW,
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
                 ...(isPinned ? { backgroundColor: handlerColor || 'white' } : {}),
-                borderTop: tdIsGroupStart ? groupBorder : '1px solid transparent',
-                borderBottom: tdIsGroupEnd ? groupBorder : '1px solid transparent',
-                borderLeft: colBorder,
-                borderRight: colBorder,
+                borderTop: isActive ? '2px solid #ef4444' : tdIsGroupStart ? groupBorder : '1px solid transparent',
+                borderBottom: isActive ? '2px solid #ef4444' : tdIsGroupEnd ? groupBorder : '1px solid transparent',
+                borderLeft: isActive ? '2px solid #ef4444' : colBorder,
+                borderRight: isActive ? '2px solid #ef4444' : colBorder,
                 ...(isMergedSpan ? { verticalAlign: 'middle' } : {}),
               }}>
               {editMode
-                ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} />
+                ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} />
                 : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} />
               }
             </td>
@@ -1062,6 +1096,16 @@ export default function BookingTable({
             <option value="">담당자 전체</option>
             {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          {regionOptions.length > 0 && (
+            <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">지역 전체</option>
+              {regionOptions.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          )}
+          <input value={customersFilter} onChange={e => setCustomersFilter(e.target.value)}
+            placeholder="고객사 검색"
+            className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 w-28" />
           <div className="flex items-center gap-1 text-xs text-gray-400">
             <span>ETD</span>
             <input type="date" value={etdFrom} onChange={e => setEtdFrom(e.target.value)}
@@ -1080,7 +1124,7 @@ export default function BookingTable({
             </button>
           )}
           {hasFilter && (
-            <button onClick={() => { setCarrierFilter(''); setHandlerFilter(''); setEtdFrom(''); setEtdTo(''); setDocFilter(false) }}
+            <button onClick={() => { setCarrierFilter(''); setHandlerFilter(''); setEtdFrom(''); setEtdTo(''); setDocFilter(false); setRegionFilter(''); setCustomersFilter('') }}
               className="text-xs text-gray-400 hover:text-gray-600">✕ 초기화</button>
           )}
           <div className="ml-auto flex items-center gap-2">

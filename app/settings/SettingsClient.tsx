@@ -5,26 +5,13 @@ import Link from 'next/link'
 import {
   addCustomListItem, deleteCustomListItem, updateCustomListItem,
   saveColumnSettings, addColumnDefinition, removeColumnDefinition,
-  saveCustomListOrder, saveMyColor,
+  saveCustomListOrder, saveMyProfile,
 } from './actions'
 import type { CustomList, ColumnDefinition } from '@/types'
 import { DEFAULT_DESTINATIONS, MAJOR_PORTS, CARRIERS, DEFAULT_COLUMN_ORDER, COLUMN_LABELS } from '@/types'
 
 type ListTab = 'destination' | 'port' | 'carrier'
-type MainTab = 'lists' | 'columns' | 'color'
-
-const HANDLER_COLORS: { color: string; label: string }[] = [
-  { color: '', label: '없음 (기본)' },
-  { color: '#DBEAFE', label: '파란색' },
-  { color: '#DCFCE7', label: '초록색' },
-  { color: '#FEF9C3', label: '노란색' },
-  { color: '#FEE2E2', label: '빨간색' },
-  { color: '#F3E8FF', label: '보라색' },
-  { color: '#FFEDD5', label: '주황색' },
-  { color: '#FCE7F3', label: '분홍색' },
-  { color: '#E0F2FE', label: '하늘색' },
-  { color: '#D1FAE5', label: '민트색' },
-]
+type MainTab = 'lists' | 'columns' | 'myinfo'
 
 // ── 드롭다운 목록 관리 ────────────────────────────────────────────
 
@@ -399,25 +386,35 @@ interface SettingsClientProps {
   pinnedColumns: string[]
   columnDefinitions: ColumnDefinition[]
   currentColor: string | null
+  currentName: string
+  currentRegion: string
+  currentCustomers: string
 }
 
 export default function SettingsClient({
-  customLists, columnOrder, pinnedColumns, columnDefinitions, currentColor,
+  customLists, columnOrder, pinnedColumns, columnDefinitions,
+  currentName, currentRegion, currentCustomers,
 }: SettingsClientProps) {
   const [mainTab, setMainTab] = useState<MainTab>('lists')
-  const [selectedColor, setSelectedColor] = useState(currentColor || '')
-  const [colorSaving, setColorSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [, startColorTransition] = useTransition()
 
-  const handleSaveColor = (color: string) => {
-    setSelectedColor(color)
-    setColorSaving('saving')
-    startColorTransition(async () => {
-      const result = await saveMyColor(color)
-      if (result.error) { setColorSaving('error') }
-      else { setColorSaving('saved'); setTimeout(() => setColorSaving('idle'), 2500) }
+  // 내정보
+  const [profileName, setProfileName] = useState(currentName)
+  const [profileRegion, setProfileRegion] = useState(currentRegion)
+  const [profileCustomers, setProfileCustomers] = useState(currentCustomers)
+  const [profileSaving, setProfileSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [profileError, setProfileError] = useState<string | null>(null)
+  const [, startProfileTransition] = useTransition()
+
+  const handleSaveProfile = () => {
+    setProfileError(null)
+    setProfileSaving('saving')
+    startProfileTransition(async () => {
+      const result = await saveMyProfile(profileName, profileRegion, profileCustomers)
+      if (result.error) { setProfileSaving('error'); setProfileError(result.error) }
+      else { setProfileSaving('saved'); setTimeout(() => setProfileSaving('idle'), 2500) }
     })
   }
+
   const [listTab, setListTab] = useState<ListTab>('destination')
 
   const destinationItems = customLists.filter(l => l.list_type === 'destination')
@@ -465,11 +462,11 @@ export default function SettingsClient({
               <span className="ml-1.5 bg-purple-100 text-purple-600 text-xs rounded-full px-1.5 py-0.5">{columnDefinitions.length}</span>
             )}
           </button>
-          <button onClick={() => setMainTab('color')}
+          <button onClick={() => setMainTab('myinfo')}
             className={`px-5 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              mainTab === 'color' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+              mainTab === 'myinfo' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}>
-            내 색상
+            내정보
           </button>
         </div>
 
@@ -505,35 +502,59 @@ export default function SettingsClient({
           </div>
         )}
 
-        {mainTab === 'color' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+        {mainTab === 'myinfo' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">내 담당자 색상</h3>
-              <p className="text-xs text-gray-500 mt-1">부킹장에서 내가 담당한 행에 표시될 배경색입니다. 다른 유저에게도 동일하게 보입니다.</p>
+              <h3 className="text-sm font-semibold text-gray-900">내 정보 변경</h3>
+              <p className="text-xs text-gray-500 mt-1">이름, 담당지역, 담당고객사를 수정합니다. 부킹장 담당자 열에 반영됩니다.</p>
             </div>
-            <div className="grid grid-cols-5 gap-3">
-              {HANDLER_COLORS.map(({ color, label }) => (
-                <button key={color || 'none'}
-                  onClick={() => handleSaveColor(color)}
-                  title={label}
-                  className={`h-10 rounded-lg border-2 transition-all ${
-                    selectedColor === color
-                      ? 'border-blue-500 scale-110 shadow-md'
-                      : 'border-gray-200 hover:border-gray-400 hover:scale-105'
-                  }`}
-                  style={{ backgroundColor: color || '#F9FAFB' }}>
-                  {!color && <span className="text-gray-400 text-xs">없음</span>}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-600">선택된 색상:</span>
-                <span className="w-6 h-6 rounded border border-gray-200" style={{ backgroundColor: selectedColor || '#F9FAFB' }} />
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
+                <input
+                  type="text"
+                  value={profileName}
+                  onChange={e => setProfileName(e.target.value)}
+                  placeholder="이름을 입력하세요"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
-              {colorSaving === 'saving' && <span className="text-xs text-gray-400">저장 중...</span>}
-              {colorSaving === 'saved' && <span className="text-xs text-green-600 font-medium">✓ 저장됨</span>}
-              {colorSaving === 'error' && <span className="text-xs text-red-600">저장 실패</span>}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">담당지역</label>
+                <input
+                  type="text"
+                  value={profileRegion}
+                  onChange={e => setProfileRegion(e.target.value)}
+                  placeholder="예: 북미, 아태, 유럽, 중남미"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">담당하는 지역을 입력하세요. 부킹장 필터에서 지역별로 조회할 수 있습니다.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">담당고객사</label>
+                <textarea
+                  value={profileCustomers}
+                  onChange={e => setProfileCustomers(e.target.value)}
+                  placeholder="예: 모비스AS, TPL, 현대글로비스"
+                  rows={3}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+                <p className="text-xs text-gray-400 mt-1">담당 고객사를 입력하세요. 쉼표로 구분하면 검색이 더 편리합니다.</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleSaveProfile}
+                disabled={profileSaving === 'saving'}
+                className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium">
+                {profileSaving === 'saving' ? '저장 중...' : '저장'}
+              </button>
+              {profileSaving === 'saved' && <span className="text-sm text-green-600 font-medium">✓ 저장됨</span>}
+              {profileSaving === 'error' && <span className="text-sm text-red-600">{profileError || '저장 실패'}</span>}
             </div>
           </div>
         )}
