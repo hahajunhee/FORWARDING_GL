@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
+import { validateInviteCode } from '@/app/actions/auth'
 import Link from 'next/link'
 
 interface AuthFormProps {
@@ -51,15 +52,10 @@ export default function AuthForm({ mode }: AuthFormProps) {
         return
       }
 
-      // 초대코드 서버 검증
-      const { data: setting } = await supabase
-        .from('global_settings')
-        .select('value')
-        .eq('key', 'invite_code')
-        .single()
-      const validCode = (setting?.value as string | null) || ''
-      if (inviteCode.trim() !== validCode) {
-        setError('초대코드가 올바르지 않습니다.')
+      // 초대코드 서버 검증 (서버 액션으로 RLS 우회)
+      const { valid, error: codeError } = await validateInviteCode(inviteCode)
+      if (!valid) {
+        setError(codeError ?? '초대코드가 올바르지 않습니다.')
         setLoading(false)
         return
       }
