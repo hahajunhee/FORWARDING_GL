@@ -98,6 +98,59 @@ export async function saveBookingRow(
   }
 }
 
+// ── 일괄 저장 (단일 revalidatePath) ───────────────────────────────
+
+export async function bulkSaveBookings(
+  edits: { id: string; data: RowData }[],
+  inserts: { tempId: string; data: RowData }[],
+): Promise<{ errors: Record<string, string> }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { errors: { _: '로그인이 필요합니다.' } }
+
+  const errors: Record<string, string> = {}
+
+  const normalize = (data: RowData): RowData => {
+    const d = { ...data }
+    if (d.forwarder_handler_id === '') d.forwarder_handler_id = null
+    if (d.doc_cutoff_date === '') d.doc_cutoff_date = null
+    if (d.proforma_etd === '') d.proforma_etd = null
+    if (d.updated_etd === '') d.updated_etd = null
+    if (d.eta === '') d.eta = null
+    return d
+  }
+
+  await Promise.all([
+    ...edits.map(async ({ id, data }) => {
+      const { error } = await supabase.from('bookings').update(normalize(data)).eq('id', id)
+      if (error) errors[id] = error.message
+    }),
+    ...inserts.map(async ({ tempId, data }) => {
+      const { error } = await supabase
+        .from('bookings')
+        .insert({ ...normalize(data), created_by: user.id })
+      if (error) errors[tempId] = error.message
+    }),
+  ])
+
+  if (Object.keys(errors).length === 0) revalidatePath('/bookings')
+  return { errors }
+}
+
+// ── 일괄 삭제 ──────────────────────────────────────────────────────
+
+export async function bulkDeleteBookings(ids: string[]): Promise<{ error: string | null }> {
+  if (ids.length === 0) return { error: null }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase.from('bookings').delete().in('id', ids)
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 // ── 열 순서 저장 ───────────────────────────────────────────────────
 
 export async function saveColumnOrder(columnOrder: string[]): Promise<void> {

@@ -47,19 +47,40 @@ function getCellValue(booking: Booking, col: string, customCols: ColumnDefinitio
   }
 }
 
-// rowSpan 계산: 연속 동일값 병합
-function computeRowSpans(rows: Booking[], col: string, customCols: ColumnDefinition[]): number[] {
-  const spans = new Array(rows.length).fill(1)
+// rowSpan 계산: 계층적 병합 (최종도착지 → 양하항 → 선사)
+function buildHierarchicalSpans(rows: Booking[]): Record<string, number[]> {
+  const n = rows.length
+  const result: Record<string, number[]> = {
+    final_destination: Array(n).fill(1),
+    discharge_port: Array(n).fill(1),
+    carrier: Array(n).fill(1),
+  }
+  const fd = (b: Booking) => b.final_destination || ''
+  const dp = (b: Booking) => b.discharge_port || ''
+  const ca = (b: Booking) => b.carrier || ''
+
   let i = 0
-  while (i < rows.length) {
-    let j = i + 1
-    const val = getCellValue(rows[i], col, customCols)
-    while (j < rows.length && getCellValue(rows[j], col, customCols) === val) j++
-    spans[i] = j - i
-    for (let k = i + 1; k < j; k++) spans[k] = 0
+  while (i < n) {
+    const v = fd(rows[i]); if (!v) { i++; continue }
+    let j = i + 1; while (j < n && fd(rows[j]) === v) j++
+    if (j - i > 1) { result.final_destination[i] = j - i; for (let k = i + 1; k < j; k++) result.final_destination[k] = 0 }
     i = j
   }
-  return spans
+  i = 0
+  while (i < n) {
+    const fv = fd(rows[i]); const v = dp(rows[i]); if (!v) { i++; continue }
+    let j = i + 1; while (j < n && dp(rows[j]) === v && fd(rows[j]) === fv) j++
+    if (j - i > 1) { result.discharge_port[i] = j - i; for (let k = i + 1; k < j; k++) result.discharge_port[k] = 0 }
+    i = j
+  }
+  i = 0
+  while (i < n) {
+    const fv = fd(rows[i]); const dv = dp(rows[i]); const v = ca(rows[i]); if (!v) { i++; continue }
+    let j = i + 1; while (j < n && ca(rows[j]) === v && dp(rows[j]) === dv && fd(rows[j]) === fv) j++
+    if (j - i > 1) { result.carrier[i] = j - i; for (let k = i + 1; k < j; k++) result.carrier[k] = 0 }
+    i = j
+  }
+  return result
 }
 
 type SortLevel = { col: string; dir: 'asc' | 'desc' } | null
@@ -192,15 +213,11 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
 
   const hasSorts = !!(sort1 || sort2 || sort3)
 
-  // rowSpan 계산 (병합 활성 시)
+  // rowSpan 계산 (병합 활성 시 — 최종도착지/양하항/선사만 계층 병합)
   const rowSpanMap = useMemo(() => {
     if (!mergeEnabled || !hasSorts || filtered.length === 0) return null
-    const map: Record<string, number[]> = {}
-    for (const col of selectedCols) {
-      map[col] = computeRowSpans(filtered, col, customColumns)
-    }
-    return map
-  }, [filtered, selectedCols, mergeEnabled, hasSorts, customColumns])
+    return buildHierarchicalSpans(filtered)
+  }, [filtered, mergeEnabled, hasSorts])
 
   const exportToExcel = () => {
     import('xlsx').then((XLSX) => {

@@ -20,6 +20,8 @@ export default async function BookingsPage() {
     { data: regionSetting },
     { data: customerSetting },
     { data: baseDescSetting },
+    { data: baseColLabelsSetting },
+    { data: destSortSetting },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -33,6 +35,8 @@ export default async function BookingsPage() {
     supabase.from('global_settings').select('value').eq('key', 'region_list').single(),
     supabase.from('global_settings').select('value').eq('key', 'customer_list').single(),
     supabase.from('global_settings').select('value').eq('key', 'base_col_descriptions').single(),
+    supabase.from('global_settings').select('value').eq('key', 'base_col_labels').single(),
+    supabase.from('global_settings').select('value').eq('key', 'destination_sort_order').single(),
   ])
 
   return (
@@ -48,6 +52,8 @@ export default async function BookingsPage() {
       regionList={(regionSetting?.value as string[] | null) || []}
       customerList={(customerSetting?.value as string[] | null) || []}
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}
+      baseColLabels={(baseColLabelsSetting?.value as Record<string, string> | null) || {}}
+      destinationSortOrder={(destSortSetting?.value as string[] | null) || []}
     />
   )
 }

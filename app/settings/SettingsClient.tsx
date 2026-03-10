@@ -6,6 +6,7 @@ import {
   addCustomListItem, deleteCustomListItem, updateCustomListItem,
   saveColumnSettings, addColumnDefinition, removeColumnDefinition,
   saveCustomListOrder, saveMyProfile, updateColumnDescription, saveBaseColDescriptions,
+  saveMyColor, saveBaseColLabels, saveDestinationSortOrder,
 } from './actions'
 import type { CustomList, ColumnDefinition } from '@/types'
 import { DEFAULT_DESTINATIONS, MAJOR_PORTS, CARRIERS, DEFAULT_COLUMN_ORDER, COLUMN_LABELS } from '@/types'
@@ -138,9 +139,11 @@ interface ColumnSettingsProps {
   pinnedColumns: string[]
   columnDefinitions: ColumnDefinition[]
   baseColDescriptions: Record<string, string>
+  baseColLabels: Record<string, string>
+  destinationSortOrder: string[]
 }
 
-function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseColDescriptions }: ColumnSettingsProps) {
+function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseColDescriptions, baseColLabels, destinationSortOrder }: ColumnSettingsProps) {
   const [cols, setCols] = useState<string[]>(() => {
     const customKeys = columnDefinitions.map(cd => cd.key)
     const allKeys = [...DEFAULT_COLUMN_ORDER, ...customKeys]
@@ -148,13 +151,44 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseCol
     const missing = allKeys.filter(k => !columnOrder.includes(k))
     return [...valid, ...missing]
   })
-  const [pinned, setPinned] = useState<string[]>(pinnedColumns)
+  const [pinnedCount, setPinnedCount] = useState<number>(pinnedColumns.length)
   const [isPending, startTransition] = useTransition()
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle')
 
   // 기본 열 설명
   const [baseDescs, setBaseDescs] = useState<Record<string, string>>(baseColDescriptions)
   const [baseDescSaving, setBaseDescSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
+
+  // 기본 열 라벨
+  const [baseLabels, setBaseLabels] = useState<Record<string, string>>(baseColLabels)
+  const [labelPassword, setLabelPassword] = useState('')
+  const [labelSaving, setLabelSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [labelError, setLabelError] = useState<string | null>(null)
+
+  const handleSaveBaseLabels = () => {
+    setLabelError(null); setLabelSaving('saving')
+    startTransition(async () => {
+      const result = await saveBaseColLabels(baseLabels, labelPassword)
+      if (result.error) { setLabelError(result.error); setLabelSaving('error') }
+      else { setLabelSaving('saved'); setLabelPassword(''); setTimeout(() => setLabelSaving('idle'), 2500) }
+    })
+  }
+
+  // 최종도착지 정렬 순서
+  const [destOrder, setDestOrder] = useState<string[]>(destinationSortOrder)
+  const [destOrderPassword, setDestOrderPassword] = useState('')
+  const [destOrderSaving, setDestOrderSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [destOrderError, setDestOrderError] = useState<string | null>(null)
+  const [newDestItem, setNewDestItem] = useState('')
+
+  const handleSaveDestOrder = () => {
+    setDestOrderError(null); setDestOrderSaving('saving')
+    startTransition(async () => {
+      const result = await saveDestinationSortOrder(destOrder, destOrderPassword)
+      if (result.error) { setDestOrderError(result.error); setDestOrderSaving('error') }
+      else { setDestOrderSaving('saved'); setDestOrderPassword(''); setTimeout(() => setDestOrderSaving('idle'), 2500) }
+    })
+  }
 
   const handleSaveBaseDescs = () => {
     setBaseDescSaving('saving')
@@ -190,20 +224,16 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseCol
   const allColLabels: Record<string, string> = { ...COLUMN_LABELS }
   for (const cd of columnDefinitions) allColLabels[cd.key] = cd.label
 
-  const togglePin = (col: string) => {
-    setPinned(prev =>
-      prev.includes(col) ? prev.filter(p => p !== col) : [...prev, col]
-    )
-  }
+  const effectivePinned = cols.slice(0, pinnedCount)
 
   const handleReset = () => {
     setCols(DEFAULT_COLUMN_ORDER)
-    setPinned(['forwarder_handler', 'discharge_port', 'final_destination'])
+    setPinnedCount(3)
   }
 
   const handleSave = () => {
     startTransition(async () => {
-      const result = await saveColumnSettings(cols, pinned)
+      const result = await saveColumnSettings(cols, effectivePinned)
       if (result.error) {
         setSaveState('error')
       } else {
@@ -255,23 +285,34 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseCol
       <div className="space-y-4">
         <div className="flex items-start justify-between">
           <p className="text-sm text-gray-500 leading-relaxed">
-            열 순서와 고정 여부를 설정합니다.<br />
-            <span className="text-blue-600">📌 고정된 열</span>은 테이블 가장 왼쪽에 항상 표시됩니다.<br />
-            <span className="text-gray-400">행을 드래그하여 순서를 바꾸세요. 저장하면 유지됩니다.</span>
+            열 순서와 고정 열 수를 설정합니다.<br />
+            <span className="text-blue-600">📌 고정된 열</span>은 테이블 가장 왼쪽에 항상 표시됩니다.
           </p>
           <button onClick={handleReset} className="text-xs text-gray-400 hover:text-gray-600 whitespace-nowrap ml-4">
             기본값으로
           </button>
         </div>
 
+        {/* 고정 열 수 설정 */}
+        <div className="flex items-center gap-3 bg-blue-50 rounded-lg px-4 py-2.5">
+          <span className="text-sm font-medium text-blue-800">고정 열 수:</span>
+          <input
+            type="number" min={0} max={cols.length} value={pinnedCount}
+            onChange={e => setPinnedCount(Math.min(Math.max(0, parseInt(e.target.value) || 0), cols.length))}
+            className="w-16 border border-blue-300 rounded-lg px-2 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+          />
+          <span className="text-xs text-blue-600">
+            {pinnedCount > 0 ? `처음 ${pinnedCount}개 열이 고정됩니다` : '고정 없음'}
+          </span>
+        </div>
+
         <div className="border border-gray-200 rounded-lg overflow-hidden">
           <div className="bg-gray-50 px-3 py-2 text-xs text-gray-500 font-medium border-b border-gray-200 flex gap-2">
             <span className="w-12 text-center">순서</span>
             <span className="flex-1">열 이름</span>
-            <span className="w-20 text-center">고정</span>
           </div>
           {cols.map((col, idx) => {
-            const isPinned = pinned.includes(col)
+            const isPinned = idx < pinnedCount
             const isCustom = columnDefinitions.some(cd => cd.key === col)
             return (
               <div key={col}
@@ -290,16 +331,8 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseCol
                 <span className="flex-1 text-sm text-gray-800 font-medium flex items-center gap-1.5">
                   {allColLabels[col] || col}
                   {isCustom && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded font-normal">커스텀</span>}
+                  {isPinned && <span className="text-xs text-blue-500">📌</span>}
                 </span>
-                <button
-                  onClick={() => togglePin(col)}
-                  className={`w-20 text-xs py-1 px-2 rounded-lg font-medium transition-colors ${
-                    isPinned
-                      ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                  }`}>
-                  {isPinned ? '📌 고정됨' : '고정'}
-                </button>
               </div>
             )
           })}
@@ -314,11 +347,11 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseCol
           {saveState === 'error' && <span className="text-sm text-red-600">저장 실패. 다시 시도해주세요.</span>}
         </div>
 
-        {pinned.length > 0 && (
+        {effectivePinned.length > 0 && (
           <div className="bg-blue-50 rounded-lg p-3">
             <p className="text-xs text-blue-700 font-medium mb-1">현재 고정열 (왼쪽부터):</p>
             <div className="flex flex-wrap gap-1.5">
-              {pinned.map((col, i) => (
+              {effectivePinned.map((col, i) => (
                 <span key={col} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
                   {i + 1}. {allColLabels[col] || col}
                 </span>
@@ -353,6 +386,84 @@ function ColumnSettings({ columnOrder, pinnedColumns, columnDefinitions, baseCol
               />
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* 기본 열 라벨 변경 (비밀번호 필요) */}
+      <div className="border-t border-gray-200 pt-6 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">기본 열 이름 변경</h3>
+            <p className="text-xs text-gray-500 mt-0.5">열 제목 표시 이름을 변경합니다. 비밀번호가 필요하며 모든 사용자에게 반영됩니다.</p>
+          </div>
+        </div>
+        <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          {DEFAULT_COLUMN_ORDER.map(key => (
+            <div key={key} className="flex items-center gap-3 px-3 py-2">
+              <span className="text-xs text-gray-400 font-mono w-32 shrink-0">{COLUMN_LABELS[key] || key}</span>
+              <input
+                type="text"
+                value={baseLabels[key] || ''}
+                onChange={e => setBaseLabels(prev => ({ ...prev, [key]: e.target.value }))}
+                placeholder={COLUMN_LABELS[key] || key}
+                className="flex-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="password" value={labelPassword} onChange={e => setLabelPassword(e.target.value)}
+            placeholder="비밀번호"
+            className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <button onClick={handleSaveBaseLabels} disabled={isPending || !labelPassword}
+            className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium">
+            {labelSaving === 'saving' ? '저장 중...' : labelSaving === 'saved' ? '✓ 저장됨' : '저장'}
+          </button>
+          {labelError && <p className="text-xs text-red-600">{labelError}</p>}
+        </div>
+      </div>
+
+      {/* 최종도착지 정렬 순서 */}
+      <div className="border-t border-gray-200 pt-6 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">최종도착지 정렬 순서</h3>
+          <p className="text-xs text-gray-500 mt-0.5">부킹장 정렬 시 이 순서대로 최종도착지가 배열됩니다. 비밀번호가 필요합니다.</p>
+        </div>
+        <div className="flex gap-2">
+          <input type="text" value={newDestItem} onChange={e => setNewDestItem(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && newDestItem.trim()) { setDestOrder(p => [...p, newDestItem.trim()]); setNewDestItem('') } }}
+            placeholder="도착지 추가"
+            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <button onClick={() => { if (newDestItem.trim()) { setDestOrder(p => [...p, newDestItem.trim()]); setNewDestItem('') } }}
+            className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">추가</button>
+        </div>
+        {destOrder.length > 0 && (
+          <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-52 overflow-y-auto">
+            {destOrder.map((dest, idx) => (
+              <div key={idx} className="flex items-center gap-2 px-3 py-1.5">
+                <span className="text-xs text-gray-400 w-6">{idx + 1}</span>
+                <span className="flex-1 text-sm text-gray-800">{dest}</span>
+                <div className="flex gap-0.5">
+                  <button onClick={() => { if (idx > 0) { const n = [...destOrder]; [n[idx-1],n[idx]] = [n[idx],n[idx-1]]; setDestOrder(n) } }}
+                    disabled={idx === 0} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-sm w-5">↑</button>
+                  <button onClick={() => { if (idx < destOrder.length-1) { const n = [...destOrder]; [n[idx],n[idx+1]] = [n[idx+1],n[idx]]; setDestOrder(n) } }}
+                    disabled={idx === destOrder.length-1} className="text-gray-300 hover:text-gray-600 disabled:opacity-20 text-sm w-5">↓</button>
+                </div>
+                <button onClick={() => setDestOrder(p => p.filter((_,i) => i !== idx))}
+                  className="text-red-400 hover:text-red-600 text-xs px-1">✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="password" value={destOrderPassword} onChange={e => setDestOrderPassword(e.target.value)}
+            placeholder="비밀번호"
+            className="w-28 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <button onClick={handleSaveDestOrder} disabled={isPending || !destOrderPassword}
+            className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium">
+            {destOrderSaving === 'saving' ? '저장 중...' : destOrderSaving === 'saved' ? '✓ 저장됨' : '저장'}
+          </button>
+          {destOrderError && <p className="text-xs text-red-600">{destOrderError}</p>}
         </div>
       </div>
 
@@ -472,12 +583,14 @@ interface SettingsClientProps {
   regionList: string[]
   customerList: string[]
   baseColDescriptions: Record<string, string>
+  baseColLabels: Record<string, string>
+  destinationSortOrder: string[]
 }
 
 export default function SettingsClient({
   customLists, columnOrder, pinnedColumns, columnDefinitions,
-  currentName, currentRegion, currentCustomers,
-  regionList, customerList, baseColDescriptions,
+  currentColor, currentName, currentRegion, currentCustomers,
+  regionList, customerList, baseColDescriptions, baseColLabels, destinationSortOrder,
 }: SettingsClientProps) {
   const [mainTab, setMainTab] = useState<MainTab>('lists')
 
@@ -488,6 +601,9 @@ export default function SettingsClient({
   const [profileSaving, setProfileSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [profileError, setProfileError] = useState<string | null>(null)
   const [, startProfileTransition] = useTransition()
+  const [profileColor, setProfileColor] = useState(currentColor || '')
+  const [colorSaving, setColorSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [, startColorTransition] = useTransition()
 
   const handleSaveProfile = () => {
     setProfileError(null)
@@ -496,6 +612,15 @@ export default function SettingsClient({
       const result = await saveMyProfile(profileName, profileRegion, profileCustomers)
       if (result.error) { setProfileSaving('error'); setProfileError(result.error) }
       else { setProfileSaving('saved'); setTimeout(() => setProfileSaving('idle'), 2500) }
+    })
+  }
+
+  const handleSaveColor = () => {
+    setColorSaving('saving')
+    startColorTransition(async () => {
+      await saveMyColor(profileColor)
+      setColorSaving('saved')
+      setTimeout(() => setColorSaving('idle'), 2500)
     })
   }
 
@@ -583,6 +708,8 @@ export default function SettingsClient({
               pinnedColumns={pinnedColumns}
               columnDefinitions={columnDefinitions}
               baseColDescriptions={baseColDescriptions}
+              baseColLabels={baseColLabels}
+              destinationSortOrder={destinationSortOrder}
             />
           </div>
         )}
@@ -670,6 +797,41 @@ export default function SettingsClient({
               </button>
               {profileSaving === 'saved' && <span className="text-sm text-green-600 font-medium">✓ 저장됨</span>}
               {profileSaving === 'error' && <span className="text-sm text-red-600">{profileError || '저장 실패'}</span>}
+            </div>
+
+            {/* 담당자 색상 */}
+            <div className="border-t border-gray-100 pt-5">
+              <h4 className="text-sm font-medium text-gray-900 mb-1">담당자 색상</h4>
+              <p className="text-xs text-gray-400 mb-3">부킹장에서 내 담당 행 배경색으로 표시됩니다.</p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={profileColor || '#ffffff'}
+                  onChange={e => setProfileColor(e.target.value)}
+                  className="w-10 h-9 rounded-lg border border-gray-200 cursor-pointer p-0.5"
+                />
+                <input
+                  type="text"
+                  value={profileColor}
+                  onChange={e => setProfileColor(e.target.value)}
+                  placeholder="#rrggbb 또는 비워두면 색상 없음"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                />
+                <button
+                  onClick={() => setProfileColor('')}
+                  className="text-xs px-3 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors">
+                  초기화
+                </button>
+                <button
+                  onClick={handleSaveColor}
+                  disabled={colorSaving === 'saving'}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium">
+                  {colorSaving === 'saving' ? '저장 중...' : colorSaving === 'saved' ? '✓ 저장됨' : '저장'}
+                </button>
+              </div>
+              {profileColor && (
+                <div className="mt-2 h-6 rounded-lg border border-gray-200" style={{ backgroundColor: profileColor }} />
+              )}
             </div>
           </div>
         )}

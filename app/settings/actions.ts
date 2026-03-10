@@ -215,6 +215,50 @@ export async function updateColumnDescription(
   return { error: null }
 }
 
+// ── 기본 열 라벨 저장 (비밀번호 필요) ────────────────────────────────
+
+export async function saveBaseColLabels(
+  labels: Record<string, string>,
+  password: string,
+): Promise<{ error: string | null }> {
+  if (password !== '4478') return { error: '비밀번호가 올바르지 않습니다.' }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'base_col_labels', value: labels })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  revalidatePath('/settings')
+  return { error: null }
+}
+
+// ── 최종도착지 정렬 순서 저장 ────────────────────────────────────────
+
+export async function saveDestinationSortOrder(
+  order: string[],
+  password: string,
+): Promise<{ error: string | null }> {
+  if (password !== '4478') return { error: '비밀번호가 올바르지 않습니다.' }
+
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'destination_sort_order', value: order })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  revalidatePath('/settings')
+  return { error: null }
+}
+
 // ── 기본 열 설명 저장 (global_settings) ─────────────────────────────
 
 export async function saveBaseColDescriptions(

@@ -23,6 +23,8 @@ interface Props {
   regionList: string[]
   customerList: string[]
   baseColDescriptions: Record<string, string>
+  baseColLabels?: Record<string, string>
+  destinationSortOrder?: string[]
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -65,7 +67,7 @@ const MASTER_EMAIL = 'hahajunhee@glovis.net'
 
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns, initialScheduleCols,
-  regionList, customerList, baseColDescriptions,
+  regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [],
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -188,6 +190,8 @@ export default function BookingPageLayout({
                 regionList={regionList}
                 customerList={customerList}
                 baseColDescriptions={baseColDescriptions}
+                baseColLabels={baseColLabels}
+                destinationSortOrder={destinationSortOrder}
               />
             </div>
           )}
