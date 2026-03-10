@@ -160,7 +160,8 @@ export async function bulkDeleteBookings(ids: string[]): Promise<{ error: string
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
 
-  const { error } = await supabase.from('bookings').delete().in('id', ids)
+  // 내 담당 건만 삭제 (DB 레벨에서도 강제)
+  const { error } = await supabase.from('bookings').delete().in('id', ids).eq('forwarder_handler_id', user.id)
   if (error) return { error: error.message }
   revalidatePath('/bookings')
   return { error: null }

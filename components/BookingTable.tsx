@@ -34,15 +34,18 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
 }
 
 // pinnedColumns 기준으로 sticky left 오프셋 계산 (colWidths 반영)
+const MANAGE_COL_W = 90 // 관리 열 너비 (edit mode 시 왼쪽 고정)
+
 function getFixedLeft(
   col: string,
   pinnedCols: string[],
   colDefs: Record<string, { label: string; minW: number }>,
   colWidths: Record<string, number>,
+  manageColOffset: number = 0,
 ): number | null {
   const idx = pinnedCols.indexOf(col)
   if (idx === -1) return null
-  let left = 36 // checkbox column width
+  let left = 36 + manageColOffset // checkbox + 관리 열(editMode 시)
   for (let i = 0; i < idx; i++) {
     const k = pinnedCols[i]
     left += colWidths[k] || colDefs[k]?.minW || 100
@@ -613,6 +616,7 @@ export default function BookingTable({
   const [activeCell, setActiveCell] = useState<{ id: string; col: string } | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<{ field: string; value: string }[]>([])
+  const [sortsSaved, setSortsSaved] = useState(false)
 
   // 마운트 시 localStorage에서 복원 (raw setter 사용 → 저장 루프 없음)
   useEffect(() => {
@@ -925,9 +929,20 @@ export default function BookingTable({
 
   const handleBulkDelete = async () => {
     if (selectedRows.size === 0) return
+    // 내 담당 건만 삭제 가능
+    const ownedIds = Array.from(selectedRows).filter(id => {
+      const b = bookings.find(bk => bk.id === id)
+      return b?.forwarder_handler_id === currentUserId
+    })
+    if (ownedIds.length === 0) {
+      alert('내 담당 건만 삭제할 수 있습니다. 타인 담당 건은 포워더 담당자를 변경한 후 삭제해주세요.')
+      return
+    }
+    const skipped = selectedRows.size - ownedIds.length
+    if (skipped > 0 && !confirm(`${ownedIds.length}건만 삭제됩니다 (타인 담당 ${skipped}건은 제외). 계속하시겠습니까?`)) return
     setBulkDeleting(true)
     try {
-      const { error } = await bulkDeleteBookings(Array.from(selectedRows))
+      const { error } = await bulkDeleteBookings(ownedIds)
       if (!error) { setSelectedRows(new Set()); router.refresh() }
     } finally {
       setBulkDeleting(false)
@@ -995,24 +1010,69 @@ export default function BookingTable({
     const hasEdits = Object.keys(edits).length > 0
     const err = rowErrors[booking.id]
     const handlerColor = booking.forwarder_handler?.color || ''
+    const isOwnBooking = booking.forwarder_handler_id === currentUserId
 
     const isGroupStart = !prevBooking || !isSameGroup(booking, prevBooking)
     const isGroupEnd = !nextBooking || !isSameGroup(booking, nextBooking)
     const groupBorder = '1.5px solid #9ca3af'
     const colBorder = '1px solid #e5e7eb'
-
     const isSelected = selectedRows.has(booking.id)
+    const manageOffset = editMode ? MANAGE_COL_W : 0
+
+    const manageCell = (
+      <td className={`table-td ${editMode ? 'sticky z-10' : ''}`}
+        style={{
+          ...(editMode ? { left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: isSelected ? '#eff6ff' : (handlerColor || 'white') } : {}),
+          borderTop: isGroupStart ? groupBorder : '1px solid transparent',
+          borderBottom: isGroupEnd ? groupBorder : '1px solid transparent',
+          borderLeft: colBorder,
+          borderRight: colBorder,
+        }}>
+        {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
+        {!isOwnBooking && editMode
+          ? <span className="text-xs text-gray-400 italic">타인 담당</span>
+          : (
+            <div className="flex items-center gap-1 flex-wrap">
+              {editMode && hasEdits && (
+                <button onClick={() => {
+                  setRowEdits(p => { const c = { ...p }; delete c[booking.id]; return c })
+                  setRowErrors(p => { const c = { ...p }; delete c[booking.id]; return c })
+                }} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition-colors">되돌리기</button>
+              )}
+              <button onClick={() => handleCopyRow(booking)}
+                className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                title="이 행을 복사하여 새 행으로 추가">복사</button>
+              {isOwnBooking && (
+                deleteConfirmId === booking.id ? (
+                  <>
+                    <button onClick={() => handleDelete(booking.id)} disabled={isPending}
+                      className="text-xs px-2 py-1 bg-red-600 text-white rounded">확인</button>
+                    <button onClick={() => setDeleteConfirmId(null)}
+                      className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded">취소</button>
+                  </>
+                ) : (
+                  <button onClick={() => setDeleteConfirmId(booking.id)}
+                    className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">삭제</button>
+                )
+              )}
+            </div>
+          )
+        }
+      </td>
+    )
+
     return (
       <tr key={booking.id}
         className="transition-colors"
         style={{
           backgroundColor: isSelected ? '#eff6ff' : (handlerColor || undefined),
-          ...(editMode && hasEdits ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
+          ...(editMode && hasEdits && isOwnBooking ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
         }}>
         <td className="table-td w-9 sticky left-0 z-10 bg-white"
           style={{ backgroundColor: isSelected ? '#eff6ff' : (handlerColor || 'white') }}>
           <input type="checkbox" checked={isSelected} onChange={() => toggleRowSelect(booking.id)} className="rounded" />
         </td>
+        {editMode && manageCell}
         {colsToRender.map(col => {
           const def = allColDefs[col]
           if (!def) return null
@@ -1024,17 +1084,17 @@ export default function BookingTable({
           const rowSpan = spanInfo.span > 1 ? spanInfo.span : undefined
           const isMergedSpan = spanInfo.span > 1
           const isPinned = pinnedColumns.includes(col)
-          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
+          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, manageOffset)
           const isDocCol = col === 'doc_cutoff_date'
 
           const tdIsGroupStart = isMergedSpan ? true : isGroupStart
           const tdIsGroupEnd = isMergedSpan ? true : isGroupEnd
-          const isActive = editMode && activeCell?.id === booking.id && activeCell?.col === col
+          const isActive = editMode && isOwnBooking && activeCell?.id === booking.id && activeCell?.col === col
 
           return (
             <td key={col}
               rowSpan={rowSpan}
-              onClick={editMode
+              onClick={editMode && isOwnBooking
                 ? () => setActiveCell({ id: booking.id, col })
                 : (!editMode && isDocCol && booking.doc_cutoff_date ? () => setDocFilter(v => !v) : undefined)
               }
@@ -1042,7 +1102,8 @@ export default function BookingTable({
                 ${isPinned ? 'sticky z-10 bg-white' : ''}
                 ${dragOver === col && dragSrc !== col ? 'bg-blue-50' : ''}
                 ${!editMode && isDocCol && booking.doc_cutoff_date ? 'cursor-pointer hover:bg-red-50' : ''}
-                ${editMode ? 'p-0.5 cursor-pointer' : ''}
+                ${editMode && isOwnBooking ? 'p-0.5 cursor-pointer' : ''}
+                ${editMode && !isOwnBooking ? 'opacity-60' : ''}
               `}
               style={{
                 minWidth: colWidths[col] || def.minW,
@@ -1054,60 +1115,34 @@ export default function BookingTable({
                 borderRight: isActive ? '2px solid #ef4444' : colBorder,
                 ...(isMergedSpan ? { verticalAlign: 'middle' } : {}),
               }}>
-              {editMode
+              {editMode && isOwnBooking
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} />
                 : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} />
               }
             </td>
           )
         })}
-        <td className="table-td" style={{
-          borderTop: isGroupStart ? groupBorder : '1px solid transparent',
-          borderBottom: isGroupEnd ? groupBorder : '1px solid transparent',
-          borderLeft: colBorder,
-          borderRight: colBorder,
-        }}>
-          {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
-          <div className="flex items-center gap-1 flex-wrap">
-            {editMode && hasEdits && (
-              <button onClick={() => {
-                setRowEdits(p => { const c = { ...p }; delete c[booking.id]; return c })
-                setRowErrors(p => { const c = { ...p }; delete c[booking.id]; return c })
-              }} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition-colors">되돌리기</button>
-            )}
-            <button onClick={() => handleCopyRow(booking)}
-              className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-              title="이 행을 복사하여 새 행으로 추가">복사</button>
-            {booking.forwarder_handler_id === currentUserId && (
-              deleteConfirmId === booking.id ? (
-                <>
-                  <button onClick={() => handleDelete(booking.id)} disabled={isPending}
-                    className="text-xs px-2 py-1 bg-red-600 text-white rounded">확인</button>
-                  <button onClick={() => setDeleteConfirmId(null)}
-                    className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded">취소</button>
-                </>
-              ) : (
-                <button onClick={() => setDeleteConfirmId(booking.id)}
-                  className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">삭제</button>
-              )
-            )}
-          </div>
-        </td>
+        {!editMode && manageCell}
       </tr>
     )
   }
 
   function renderNewRow(row: NewRow) {
     const err = rowErrors[row.tempId]
+    const newRowBorder = { border: '1px solid #e5e7eb' }
     return (
       <tr key={row.tempId} className="bg-violet-50/60">
         <td className="table-td w-9 sticky left-0 z-10" style={{ backgroundColor: '#f5f3ff' }} />
+        <td className="table-td sticky z-10" style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: '#f5f3ff', ...newRowBorder }}>
+          {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
+          <button onClick={() => { setNewRows(prev => prev.filter(r => r.tempId !== row.tempId)); setRowErrors(p => { const c = { ...p }; delete c[row.tempId]; return c }) }}
+            className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">제거</button>
+        </td>
         {colsToRender.map(col => {
           const def = allColDefs[col]
           if (!def) return null
           const isPinned = pinnedColumns.includes(col)
-          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
-          const newRowBorder = { border: '1px solid #e5e7eb' }
+          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, MANAGE_COL_W)
           return (
             <td key={col} className={`table-td text-xs ${isPinned ? 'sticky z-10' : ''}`}
               style={{ minWidth: def.minW, ...(fixedLeft !== null ? { left: fixedLeft } : {}), ...(isPinned ? { backgroundColor: '#f5f3ff' } : {}), ...newRowBorder }}>
@@ -1117,11 +1152,6 @@ export default function BookingTable({
             </td>
           )
         })}
-        <td className="table-td" style={{ border: '1px solid #e5e7eb' }}>
-          {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
-          <button onClick={() => { setNewRows(prev => prev.filter(r => r.tempId !== row.tempId)); setRowErrors(p => { const c = { ...p }; delete c[row.tempId]; return c }) }}
-            className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">제거</button>
-        </td>
       </tr>
     )
   }
@@ -1298,9 +1328,14 @@ export default function BookingTable({
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-gray-100 rounded" /> 마감 지남</span>
         {sorts.length > 0 && !editMode && <span className="flex items-center gap-1 text-blue-500 font-medium ml-2">정렬: {sorts.map((s, i) => <span key={s.col}>{i > 0 && ' › '}{BASE_COL_DEFS[s.col]?.label || s.col} {s.dir === 'asc' ? '↑' : '↓'}</span>)} <button onClick={() => setSorts([])} className="text-gray-400 hover:text-gray-600 ml-1">✕</button></span>}
         <div className="flex items-center gap-1.5 ml-auto">
-          <button onClick={() => { try { localStorage.setItem('bk_default_sorts', JSON.stringify(sorts)) } catch {} }}
-            className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 border border-blue-200 rounded hover:bg-blue-100 transition-colors">
-            정렬 기본 저장
+          <button onClick={() => {
+            try {
+              localStorage.setItem('bk_default_sorts', JSON.stringify(sorts))
+              setSortsSaved(true)
+              setTimeout(() => setSortsSaved(false), 2000)
+            } catch {}
+          }} className={`text-xs px-2 py-0.5 border rounded transition-colors ${sortsSaved ? 'bg-green-100 text-green-700 border-green-300' : 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'}`}>
+            {sortsSaved ? '✓ 저장됨' : '정렬 기본 저장'}
           </button>
           <button onClick={() => { try { const s = localStorage.getItem('bk_default_sorts'); if (s) setSorts(JSON.parse(s)) } catch {} }}
             className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 border border-gray-200 rounded hover:bg-gray-200 transition-colors">
@@ -1337,12 +1372,14 @@ export default function BookingTable({
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-violet-100/70">
-                    <th className="table-th w-9 text-violet-700" />
+                    <th className="table-th w-9 text-violet-700 sticky left-0 z-20" style={{ backgroundColor: '#ede9fe' }} />
+                    <th className="table-th text-xs text-violet-700 sticky z-20"
+                      style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: '#ede9fe' }}>관리</th>
                     {colsToRender.map(col => {
                       const def = allColDefs[col]
                       if (!def) return null
                       const isPinned = pinnedColumns.includes(col)
-                      const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
+                      const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, MANAGE_COL_W)
                       return (
                         <th key={col}
                           className={`table-th text-xs text-violet-700 ${isPinned ? 'sticky z-20' : ''}`}
@@ -1351,7 +1388,6 @@ export default function BookingTable({
                         </th>
                       )
                     })}
-                    <th className="table-th text-xs text-violet-700 min-w-[70px]">관리</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1378,11 +1414,15 @@ export default function BookingTable({
                     else setSelectedRows(new Set(allProcessedIds))
                   }} className="rounded" />
                 </th>
+                {editMode && (
+                  <th className="table-th bg-gray-50 sticky z-30 text-xs min-w-0"
+                    style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W }}>관리</th>
+                )}
                 {colsToRender.map(col => {
                   const def = allColDefs[col]
                   if (!def) return null
                   const isPinned = pinnedColumns.includes(col)
-                  const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
+                  const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, editMode ? MANAGE_COL_W : 0)
                   return (
                     <th key={col}
                       title={def.description || undefined}
@@ -1426,7 +1466,7 @@ export default function BookingTable({
                     </th>
                   )
                 })}
-                <th className="table-th min-w-[90px] bg-gray-50">관리</th>
+                {!editMode && <th className="table-th min-w-[90px] bg-gray-50">관리</th>}
               </tr>
             </thead>
             <tbody>
