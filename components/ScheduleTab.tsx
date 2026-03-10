@@ -7,13 +7,17 @@ import { COLUMN_LABELS, DEFAULT_COLUMN_ORDER } from '@/types'
 import { formatContainers } from './BookingTable'
 import { saveGlobalScheduleCols } from '@/app/settings/actions'
 
-// 기본 열 (containers 포함)
-const BASE_AVAILABLE_COLS = DEFAULT_COLUMN_ORDER.filter(k => k !== 'containers').concat(['containers'])
+// 기본 열 (containers 포함, 가상 열 포함)
+const BASE_AVAILABLE_COLS = DEFAULT_COLUMN_ORDER.filter(k => k !== 'containers').concat([
+  'containers', 'updated_etd_v2', 'updated_etd_v1',
+])
 
 const DEFAULT_SCHED_COLS = [
   'final_destination', 'discharge_port', 'carrier', 'vessel_name',
   'booking_no', 'updated_etd', 'eta', 'containers',
 ]
+
+function isSpacerCol(col: string) { return col.startsWith('__spacer_') }
 
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '-'
@@ -21,6 +25,7 @@ function fmtDate(d: string | null | undefined): string {
 }
 
 function getCellValue(booking: Booking, col: string, customCols: ColumnDefinition[] = []): string {
+  if (isSpacerCol(col)) return ''
   switch (col) {
     case 'booking_no': return (booking.booking_entries && booking.booking_entries.length > 0)
       ? booking.booking_entries.map(e => e.no).join(' / ')
@@ -36,6 +41,8 @@ function getCellValue(booking: Booking, col: string, customCols: ColumnDefinitio
     case 'doc_cutoff_date': return fmtDate(booking.doc_cutoff_date)
     case 'proforma_etd': return fmtDate(booking.proforma_etd)
     case 'updated_etd': return fmtDate(booking.updated_etd)
+    case 'updated_etd_v1': return fmtDate(booking.updated_etd_prev)
+    case 'updated_etd_v2': return fmtDate(booking.updated_etd)
     case 'eta': return fmtDate(booking.eta)
     case 'containers': return formatContainers(booking)
     case 'remarks': return booking.remarks || ''
@@ -44,6 +51,30 @@ function getCellValue(booking: Booking, col: string, customCols: ColumnDefinitio
       if (cd) return (booking.extra_data as Record<string, string> | null)?.[col] || ''
       return ''
     }
+  }
+}
+
+// Excel 출력용: 날짜 → Date 객체, 숫자 → number, 나머지 → string
+function getExcelValue(booking: Booking, col: string, customCols: ColumnDefinition[] = []): Date | number | string {
+  if (isSpacerCol(col)) return ''
+  const toDate = (d: string | null | undefined): Date | string => {
+    if (!d) return ''
+    try { const p = parseISO(d); return isValid(p) ? p : '' } catch { return '' }
+  }
+  switch (col) {
+    case 'doc_cutoff_date': return toDate(booking.doc_cutoff_date)
+    case 'proforma_etd': return toDate(booking.proforma_etd)
+    case 'updated_etd': return toDate(booking.updated_etd)
+    case 'updated_etd_v1': return toDate(booking.updated_etd_prev)
+    case 'updated_etd_v2': return toDate(booking.updated_etd)
+    case 'eta': return toDate(booking.eta)
+    case 'qty_20_normal': return booking.qty_20_normal ?? 0
+    case 'qty_20_dg': return booking.qty_20_dg ?? 0
+    case 'qty_20_reefer': return booking.qty_20_reefer ?? 0
+    case 'qty_40_normal': return booking.qty_40_normal ?? 0
+    case 'qty_40_dg': return booking.qty_40_dg ?? 0
+    case 'qty_40_reefer': return booking.qty_40_reefer ?? 0
+    default: return getCellValue(booking, col, customCols)
   }
 }
 
@@ -132,18 +163,34 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  // 사용 가능한 모든 열
+  // 사용 가능한 모든 열 (스페이서 제외 — 버튼으로만 추가)
   const availableCols = useMemo(() => [
     ...BASE_AVAILABLE_COLS,
     ...customColumns.map(c => c.key),
   ], [customColumns])
 
-  // 전체 열 라벨 맵
+  const addSpacerCol = () => {
+    setSelectedCols(prev => [...prev, `__spacer_${Date.now()}`])
+  }
+
+  const removeCol = (col: string) => {
+    setSelectedCols(prev => prev.filter(c => c !== col))
+  }
+
+  // 전체 열 라벨 맵 (가상 열 + 스페이서 포함)
   const allLabels = useMemo(() => {
-    const m: Record<string, string> = { ...COLUMN_LABELS }
+    const m: Record<string, string> = {
+      ...COLUMN_LABELS,
+      updated_etd_v1: 'UPDATED ETD_V1',
+      updated_etd_v2: 'UPDATED ETD_V2',
+    }
     for (const cd of customColumns) m[cd.key] = cd.label
+    // 스페이서 열 라벨
+    for (const col of selectedCols) {
+      if (isSpacerCol(col)) m[col] = '(빈 열)'
+    }
     return m
-  }, [customColumns])
+  }, [customColumns, selectedCols])
 
   const toggleCol = (col: string) => {
     setSelectedCols(prev => prev.includes(col)
@@ -222,20 +269,39 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
   const exportToExcel = () => {
     import('xlsx').then((XLSX) => {
       const header = selectedCols.map(c => allLabels[c] || c)
-      const rows = filtered.map(b => selectedCols.map(c => getCellValue(b, c, customColumns)))
-      const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
+      const rows = filtered.map(b => selectedCols.map(c => getExcelValue(b, c, customColumns)))
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rows], { cellDates: true, dateNF: 'yyyy-mm-dd' })
       ws['!cols'] = header.map((h, i) => ({
-        wch: Math.max(h.length + 2, ...rows.map(r => String(r[i] || '').length))
+        wch: Math.max(h.length + 2, ...rows.map(r => {
+          const v = r[i]
+          return v instanceof Date ? 12 : String(v || '').length
+        }))
       }))
+
+      // 병합 활성 시 Excel에도 병합 적용
+      if (rowSpanMap) {
+        const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = []
+        for (const [col, spans] of Object.entries(rowSpanMap)) {
+          const colIdx = selectedCols.indexOf(col)
+          if (colIdx === -1) continue
+          for (let ri = 0; ri < spans.length; ri++) {
+            if (spans[ri] > 1) {
+              merges.push({ s: { r: ri + 1, c: colIdx }, e: { r: ri + spans[ri], c: colIdx } })
+            }
+          }
+        }
+        if (merges.length > 0) ws['!merges'] = merges
+      }
+
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, '스케줄')
-      XLSX.writeFile(wb, `스케줄_${etdFrom}_${etdTo}.xlsx`)
+      XLSX.writeFile(wb, `스케줄_${etdFrom}_${etdTo}.xlsx`, { cellDates: true })
     })
   }
 
   const sortOptions = [
     { value: '', label: '정렬 없음' },
-    ...selectedCols.map(col => ({ value: col, label: allLabels[col] || col })),
+    ...selectedCols.filter(c => !isSpacerCol(c)).map(col => ({ value: col, label: allLabels[col] || col })),
   ]
 
   function SortSelect({ value, onChange, label }: {
@@ -317,16 +383,28 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
             {/* 선택된 열 */}
             <div className="flex-1 space-y-1 max-h-52 overflow-y-auto">
               <p className="text-xs text-gray-400 font-medium sticky top-0 bg-white py-0.5">포함 (순서대로)</p>
-              {selectedCols.map((col, idx) => (
-                <div key={col} className="flex items-center gap-1 py-1 px-2 rounded bg-blue-50/50">
-                  <input type="checkbox" checked onChange={() => toggleCol(col)} className="rounded" />
-                  <span className="text-xs text-blue-700 flex-1 font-medium">{allLabels[col] || col}</span>
-                  <button onClick={() => moveUp(idx)} disabled={idx === 0}
-                    className="text-gray-400 hover:text-gray-700 disabled:opacity-20 text-sm w-4">↑</button>
-                  <button onClick={() => moveDown(idx)} disabled={idx === selectedCols.length - 1}
-                    className="text-gray-400 hover:text-gray-700 disabled:opacity-20 text-sm w-4">↓</button>
-                </div>
-              ))}
+              {selectedCols.map((col, idx) => {
+                const isSpacer = isSpacerCol(col)
+                return (
+                  <div key={col} className={`flex items-center gap-1 py-1 px-2 rounded ${isSpacer ? 'bg-gray-100/80' : 'bg-blue-50/50'}`}>
+                    {isSpacer
+                      ? <button onClick={() => removeCol(col)} className="text-gray-400 hover:text-red-500 text-xs w-4 font-bold flex-shrink-0">✕</button>
+                      : <input type="checkbox" checked onChange={() => toggleCol(col)} className="rounded" />
+                    }
+                    <span className={`text-xs flex-1 font-medium ${isSpacer ? 'text-gray-400 italic' : 'text-blue-700'}`}>
+                      {allLabels[col] || col}
+                    </span>
+                    <button onClick={() => moveUp(idx)} disabled={idx === 0}
+                      className="text-gray-400 hover:text-gray-700 disabled:opacity-20 text-sm w-4">↑</button>
+                    <button onClick={() => moveDown(idx)} disabled={idx === selectedCols.length - 1}
+                      className="text-gray-400 hover:text-gray-700 disabled:opacity-20 text-sm w-4">↓</button>
+                  </div>
+                )
+              })}
+              <button onClick={addSpacerCol}
+                className="w-full text-left text-xs py-1 px-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded border border-dashed border-gray-300 mt-1 transition-colors">
+                + 빈 열 추가
+              </button>
             </div>
           </div>
 
@@ -391,8 +469,8 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
               <thead>
                 <tr className="bg-gray-50 border-b-2 border-gray-300">
                   {selectedCols.map(col => (
-                    <th key={col} className="text-center px-3 py-2 font-semibold text-gray-600 whitespace-nowrap border-r border-gray-200 last:border-0">
-                      {allLabels[col] || col}
+                    <th key={col} className={`text-center px-3 py-2 font-semibold whitespace-nowrap border-r border-gray-200 last:border-0 ${isSpacerCol(col) ? 'text-gray-200 w-8' : 'text-gray-600'}`}>
+                      {isSpacerCol(col) ? '' : (allLabels[col] || col)}
                     </th>
                   ))}
                 </tr>

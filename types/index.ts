@@ -42,6 +42,7 @@ export interface Booking {
   doc_cutoff_date: string | null
   proforma_etd: string | null
   updated_etd: string | null
+  updated_etd_prev: string | null
   eta: string | null
   qty_20_normal: number
   qty_20_dg: number

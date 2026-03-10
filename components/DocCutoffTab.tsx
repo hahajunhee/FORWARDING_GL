@@ -156,6 +156,28 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
     }
     result = result.replace(/\{부킹목록_\d+\}/g, '')
 
+    // {부킹번호_N_M} - N번째 부킹의 M번째 booking_entry 번호
+    result = result.replace(/\{부킹번호_(\d+)_(\d+)\}/g, (_, n, m) => {
+      const row = rows[parseInt(n) - 1]
+      if (!row) return ''
+      const entryIdx = parseInt(m) - 1
+      if (row.booking_entries && row.booking_entries[entryIdx]) return row.booking_entries[entryIdx].no
+      if (entryIdx === 0) return row.booking_no || ''
+      return ''
+    })
+
+    // {컨테이너_N_M} - N번째 부킹의 M번째 booking_entry 컨테이너
+    result = result.replace(/\{컨테이너_(\d+)_(\d+)\}/g, (_, n, m) => {
+      const row = rows[parseInt(n) - 1]
+      if (!row) return ''
+      const entryIdx = parseInt(m) - 1
+      if (row.booking_entries && row.booking_entries[entryIdx]) {
+        const e = row.booking_entries[entryIdx]
+        return `${e.ctr_type}×${e.ctr_qty}`
+      }
+      return ''
+    })
+
     // 열별 변수: {label_N} → N번째 행의 값, {label} → 첫 번째 행의 값
     for (const fv of fieldVariables) {
       const escapedLabel = escapeRegex(fv.label)
@@ -348,6 +370,15 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
                 <code key={v} className="bg-orange-50 text-orange-700 px-2 py-0.5 rounded text-xs border border-orange-200">{v}</code>
               ))}
               <span className="text-xs text-gray-400 self-center">등 모든 열 지원</span>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 font-medium mb-1">부킹 엔트리 개별 변수 — <span className="text-purple-600">부킹번호_N_M</span> = N번째 부킹의 M번째 엔트리:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {['{부킹번호_1_1}', '{부킹번호_1_2}', '{컨테이너_1_1}', '{컨테이너_2_1}'].map(v => (
+                <code key={v} className="bg-purple-50 text-purple-700 px-2 py-0.5 rounded text-xs border border-purple-200">{v}</code>
+              ))}
+              <span className="text-xs text-gray-400 self-center">예: 부킹번호_3_2 = 3번째 부킹의 2번째 엔트리</span>
             </div>
           </div>
           <div>

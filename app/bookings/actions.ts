@@ -120,9 +120,24 @@ export async function bulkSaveBookings(
     return d
   }
 
+  // updated_etd 변경 시 이전 값 저장을 위해 현재 값 미리 조회
+  const etdEditIds = edits.filter(e => 'updated_etd' in e.data).map(e => e.id)
+  const currentEtdMap: Record<string, string | null> = {}
+  if (etdEditIds.length > 0) {
+    const { data: rows } = await supabase.from('bookings').select('id, updated_etd').in('id', etdEditIds)
+    if (rows) for (const r of rows) currentEtdMap[r.id] = r.updated_etd
+  }
+
   await Promise.all([
     ...edits.map(async ({ id, data }) => {
-      const { error } = await supabase.from('bookings').update(normalize(data)).eq('id', id)
+      const d = normalize(data)
+      // updated_etd가 실제로 변경됐으면 이전 값을 updated_etd_prev에 저장
+      if (id in currentEtdMap) {
+        const prevEtd = currentEtdMap[id]
+        const newEtd = (d.updated_etd as string | null | undefined) ?? null
+        if (prevEtd !== newEtd) d.updated_etd_prev = prevEtd
+      }
+      const { error } = await supabase.from('bookings').update(d).eq('id', id)
       if (error) errors[id] = error.message
     }),
     ...inserts.map(async ({ tempId, data }) => {
