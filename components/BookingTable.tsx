@@ -1029,7 +1029,7 @@ export default function BookingTable({
           borderRight: colBorder,
         }}>
         {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
-        {!isOwnBooking && editMode
+        {!isOwnBooking && editMode && !hasEdits
           ? <span className="text-xs text-gray-400 italic">타인 담당</span>
           : (
             <div className="flex items-center gap-1 flex-wrap">
@@ -1066,7 +1066,7 @@ export default function BookingTable({
         className="transition-colors"
         style={{
           backgroundColor: isSelected ? '#eff6ff' : (handlerColor || undefined),
-          ...(editMode && hasEdits && isOwnBooking ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
+          ...(editMode && hasEdits ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
         }}>
         <td className="table-td w-9 sticky left-0 z-10 bg-white"
           style={{ backgroundColor: isSelected ? '#eff6ff' : (handlerColor || 'white') }}>
@@ -1089,12 +1089,13 @@ export default function BookingTable({
 
           const tdIsGroupStart = isMergedSpan ? true : isGroupStart
           const tdIsGroupEnd = isMergedSpan ? true : isGroupEnd
-          const isActive = editMode && isOwnBooking && activeCell?.id === booking.id && activeCell?.col === col
+          const canEditCell = editMode && (isOwnBooking || col === 'forwarder_handler')
+          const isActive = canEditCell && activeCell?.id === booking.id && activeCell?.col === col
 
           return (
             <td key={col}
               rowSpan={rowSpan}
-              onClick={editMode && isOwnBooking
+              onClick={canEditCell
                 ? () => setActiveCell({ id: booking.id, col })
                 : (!editMode && isDocCol && booking.doc_cutoff_date ? () => setDocFilter(v => !v) : undefined)
               }
@@ -1102,8 +1103,8 @@ export default function BookingTable({
                 ${isPinned ? 'sticky z-10 bg-white' : ''}
                 ${dragOver === col && dragSrc !== col ? 'bg-blue-50' : ''}
                 ${!editMode && isDocCol && booking.doc_cutoff_date ? 'cursor-pointer hover:bg-red-50' : ''}
-                ${editMode && isOwnBooking ? 'p-0.5 cursor-pointer' : ''}
-                ${editMode && !isOwnBooking ? 'opacity-60' : ''}
+                ${canEditCell ? 'p-0.5 cursor-pointer' : ''}
+                ${editMode && !isOwnBooking && col !== 'forwarder_handler' ? 'opacity-60' : ''}
               `}
               style={{
                 minWidth: colWidths[col] || def.minW,
@@ -1115,7 +1116,7 @@ export default function BookingTable({
                 borderRight: isActive ? '2px solid #ef4444' : colBorder,
                 ...(isMergedSpan ? { verticalAlign: 'middle' } : {}),
               }}>
-              {editMode && isOwnBooking
+              {canEditCell
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} />
                 : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} />
               }
