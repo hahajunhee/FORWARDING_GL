@@ -25,7 +25,7 @@ export default async function BookingsPage() {
   ] = await Promise.all([
     supabase
       .from('bookings')
-      .select(`*, forwarder_handler:profiles!bookings_forwarder_handler_id_fkey(id, name, email, color, region, customers)`)
+      .select(`id, booking_no, final_destination, discharge_port, carrier, vessel_name, voyage, secured_space, mqc, customer_doc_handler, forwarder_handler_id, doc_cutoff_date, proforma_etd, updated_etd, updated_etd_prev, eta, qty_20_normal, qty_20_dg, qty_20_reefer, qty_40_normal, qty_40_dg, qty_40_reefer, remarks, booking_entries, extra_data, created_by, created_at, updated_at, forwarder_handler:profiles!bookings_forwarder_handler_id_fkey(id, name, email, color, region, customers)`)
       .order('created_at', { ascending: false }),
     supabase.from('profiles').select('*').order('name'),
     supabase.from('profiles').select('*').eq('id', user.id).single(),
