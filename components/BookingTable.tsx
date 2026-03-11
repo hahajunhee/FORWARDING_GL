@@ -19,7 +19,7 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   discharge_port:       { label: '양하항',         minW: 120 },
   carrier:              { label: '선사',            minW: 100 },
   vessel_name:          { label: '모선명',          minW: 140 },
-  voyage:               { label: '항차',            minW: 90  },
+  voyage:               { label: 'VOYAGE',           minW: 90  },
   secured_space:        { label: '확보선복',        minW: 90  },
   mqc:                  { label: 'MQC',             minW: 80  },
   customer_doc_handler: { label: '고객사 서류',     minW: 110 },

@@ -121,7 +121,7 @@ export const COLUMN_LABELS: Record<string, string> = {
   discharge_port:       '양하항',
   carrier:              '선사',
   vessel_name:          '모선명',
-  voyage:               '항차',
+  voyage:               'VOYAGE',
   secured_space:        '확보선복',
   mqc:                  'MQC',
   customer_doc_handler: '고객사 서류',
