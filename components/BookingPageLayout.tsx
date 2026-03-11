@@ -216,7 +216,7 @@ export default function BookingPageLayout({
                 <h2 className="text-lg font-bold text-gray-900">주요 스케줄</h2>
                 <p className="text-sm text-gray-500">고객사 송부용 스케줄을 열 구성 후 Excel로 다운로드합니다.</p>
               </div>
-              <ScheduleTab bookings={bookings} customColumns={customColumns} initialScheduleCols={initialScheduleCols} />
+              <ScheduleTab bookings={bookings} customColumns={customColumns} initialScheduleCols={initialScheduleCols} destinationSortOrder={destinationSortOrder} />
             </div>
           )}
         </main>

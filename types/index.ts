@@ -34,6 +34,7 @@ export interface Booking {
   discharge_port: string
   carrier: string
   vessel_name: string
+  voyage: string
   secured_space: string
   mqc: string
   customer_doc_handler: string
@@ -96,6 +97,7 @@ export const DEFAULT_COLUMN_ORDER = [
   'discharge_port',
   'carrier',
   'vessel_name',
+  'voyage',
   'secured_space',
   'mqc',
   'customer_doc_handler',
@@ -107,6 +109,7 @@ export const DEFAULT_COLUMN_ORDER = [
   'updated_etd',
   'eta',
   'containers',
+  'final_qty',
   'remarks',
 ]
 
@@ -118,6 +121,7 @@ export const COLUMN_LABELS: Record<string, string> = {
   discharge_port:       '양하항',
   carrier:              '선사',
   vessel_name:          '모선명',
+  voyage:               '항차',
   secured_space:        '확보선복',
   mqc:                  'MQC',
   customer_doc_handler: '고객사 서류',
@@ -129,6 +133,7 @@ export const COLUMN_LABELS: Record<string, string> = {
   updated_etd:          'UPDATED ETD',
   eta:                  'ETA',
   containers:           '컨테이너',
+  final_qty:            '최종수량',
   remarks:              '비고',
 }
 

@@ -19,6 +19,7 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   discharge_port:       { label: '양하항',         minW: 120 },
   carrier:              { label: '선사',            minW: 100 },
   vessel_name:          { label: '모선명',          minW: 140 },
+  voyage:               { label: '항차',            minW: 90  },
   secured_space:        { label: '확보선복',        minW: 90  },
   mqc:                  { label: 'MQC',             minW: 80  },
   customer_doc_handler: { label: '고객사 서류',     minW: 110 },
@@ -30,6 +31,7 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   updated_etd:          { label: 'UPDATED ETD',     minW: 110 },
   eta:                  { label: 'ETA',             minW: 90  },
   containers:           { label: '컨테이너',        minW: 120 },
+  final_qty:            { label: '최종수량',        minW: 80  },
   remarks:              { label: '비고',            minW: 160 },
 }
 
@@ -112,6 +114,23 @@ export function formatContainers(b: Partial<Booking>): string {
   return parts.join(' ') || '-'
 }
 
+function calcFinalQty(b: Booking): number | null {
+  if (!b.doc_cutoff_date) return null
+  try {
+    const diff = differenceInCalendarDays(parseISO(b.doc_cutoff_date), new Date())
+    if (diff >= 0) return null // 마감일이 오늘 이후면 표시 안 함
+  } catch { return null }
+  if (b.booking_entries && b.booking_entries.length > 0) {
+    return b.booking_entries.reduce((sum, e) => {
+      const mult = e.ctr_type.startsWith('20') ? 0.5 : 1
+      return sum + (e.ctr_qty || 0) * mult
+    }, 0)
+  }
+  const qty20 = (b.qty_20_normal || 0) + (b.qty_20_dg || 0) + (b.qty_20_reefer || 0)
+  const qty40 = (b.qty_40_normal || 0) + (b.qty_40_dg || 0) + (b.qty_40_reefer || 0)
+  return qty20 * 0.5 + qty40
+}
+
 function getMonthKey(d: string | null | undefined): string {
   if (!d) return 'none'
   try { const p = parseISO(d); return isValid(p) ? format(p, 'yyyy-MM') : 'none' } catch { return 'none' }
@@ -129,6 +148,7 @@ function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]
     case 'discharge_port': return b.discharge_port || ''
     case 'carrier': return b.carrier || ''
     case 'vessel_name': return b.vessel_name || ''
+    case 'voyage': return b.voyage || ''
     case 'secured_space': return b.secured_space || ''
     case 'mqc': return b.mqc || ''
     case 'customer_doc_handler': return b.customer_doc_handler || ''
@@ -385,6 +405,8 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
       </select>
     case 'vessel_name':
       return <input autoFocus={autoFocus} className={`${cls} uppercase`} value={row.vessel_name || ''} onChange={e => onChange({ vessel_name: e.target.value })} placeholder="모선명" />
+    case 'voyage':
+      return <input autoFocus={autoFocus} className={cls} value={row.voyage || ''} onChange={e => onChange({ voyage: e.target.value })} placeholder="항차" />
     case 'secured_space':
       return <input autoFocus={autoFocus} className={cls} value={row.secured_space || ''} onChange={e => onChange({ secured_space: e.target.value })} placeholder="확보선복" />
     case 'mqc':
@@ -408,6 +430,8 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
       return <span className="text-xs text-gray-400 italic px-1.5">담당자 설정에서 변경</span>
     case 'containers':
       return <span className="text-xs text-gray-400 italic px-1.5">부킹번호 열에서 편집</span>
+    case 'final_qty':
+      return <span className="text-xs text-gray-400 italic px-1.5">자동 계산</span>
     case 'remarks':
       return <input autoFocus={autoFocus} className={cls} value={row.remarks || ''} onChange={e => onChange({ remarks: e.target.value })} placeholder="비고" />
     default: {
@@ -452,6 +476,8 @@ function ViewCell({ colKey, booking, currentUserId, customColumns }: {
         : <span className="text-gray-300">-</span>
     case 'vessel_name':
       return <span className="text-xs">{booking.vessel_name || '-'}</span>
+    case 'voyage':
+      return <span className="text-xs">{booking.voyage || '-'}</span>
     case 'secured_space':
       return <span className="text-xs">{booking.secured_space || '-'}</span>
     case 'mqc':
@@ -501,6 +527,11 @@ function ViewCell({ colKey, booking, currentUserId, customColumns }: {
           {formatContainers(booking)}
         </span>
       )
+    case 'final_qty': {
+      const qty = calcFinalQty(booking)
+      if (qty === null) return <span className="text-gray-300 text-xs">-</span>
+      return <span className="text-xs font-semibold text-blue-700">{qty % 1 === 0 ? qty : qty.toFixed(1)}</span>
+    }
     case 'remarks':
       return <span className="truncate block text-xs text-gray-500 max-w-[160px]" title={booking.remarks}>{booking.remarks || '-'}</span>
     default: {

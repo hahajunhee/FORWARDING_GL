@@ -7,9 +7,9 @@ import { COLUMN_LABELS, DEFAULT_COLUMN_ORDER } from '@/types'
 import { formatContainers } from './BookingTable'
 import { saveGlobalScheduleCols } from '@/app/settings/actions'
 
-// 기본 열 (containers 포함, 가상 열 포함)
-const BASE_AVAILABLE_COLS = DEFAULT_COLUMN_ORDER.filter(k => k !== 'containers').concat([
-  'containers', 'updated_etd_v2', 'updated_etd_v1',
+// 기본 열 (containers 포함, 가상 열 포함, final_qty 제외)
+const BASE_AVAILABLE_COLS = DEFAULT_COLUMN_ORDER.filter(k => k !== 'containers' && k !== 'final_qty').concat([
+  'containers', 'updated_etd_v2', 'updated_etd_v1', 'vessel_name_voyage',
 ])
 
 const DEFAULT_SCHED_COLS = [
@@ -34,6 +34,8 @@ function getCellValue(booking: Booking, col: string, customCols: ColumnDefinitio
     case 'discharge_port': return booking.discharge_port || ''
     case 'carrier': return booking.carrier || ''
     case 'vessel_name': return booking.vessel_name || ''
+    case 'voyage': return booking.voyage || ''
+    case 'vessel_name_voyage': return [booking.vessel_name, booking.voyage].filter(Boolean).join(' / ')
     case 'secured_space': return booking.secured_space || ''
     case 'mqc': return booking.mqc || ''
     case 'customer_doc_handler': return booking.customer_doc_handler || ''
@@ -120,9 +122,10 @@ interface Props {
   bookings: Booking[]
   customColumns: ColumnDefinition[]
   initialScheduleCols: string[] | null
+  destinationSortOrder?: string[]
 }
 
-export default function ScheduleTab({ bookings, customColumns, initialScheduleCols }: Props) {
+export default function ScheduleTab({ bookings, customColumns, initialScheduleCols, destinationSortOrder = [] }: Props) {
   // ETD 기본값: 이번 달 1일 ~ 말일
   const now = new Date()
   const defaultFrom = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd')
@@ -137,6 +140,7 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
   const [sort2, _setSort2] = useState<SortLevel>(null)
   const [sort3, _setSort3] = useState<SortLevel>(null)
   const [mergeEnabled, _setMergeEnabled] = useState(true)
+  const [mobisOnly, setMobisOnly] = useState(false)
 
   useEffect(() => {
     try {
@@ -183,6 +187,7 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
       ...COLUMN_LABELS,
       updated_etd_v1: 'UPDATED ETD_V1',
       updated_etd_v2: 'UPDATED ETD_V2',
+      vessel_name_voyage: '모선명 / 항차',
     }
     for (const cd of customColumns) m[cd.key] = cd.label
     // 스페이서 열 라벨
@@ -229,13 +234,20 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
     })
   }
 
-  // ETD 기준 필터 + 다중 정렬
+  // ETD 기준 필터 + 모비스 필터 + 다중 정렬
+  const destOrderMap = useMemo(() =>
+    destinationSortOrder.length > 0
+      ? Object.fromEntries(destinationSortOrder.map((d, i) => [d, i]))
+      : null
+  , [destinationSortOrder])
+
   const filtered = useMemo(() => {
     const etdFiltered = bookings.filter(b => {
       const etd = b.updated_etd || b.proforma_etd
       if (!etd) return false
       if (etdFrom && etd < etdFrom) return false
       if (etdTo && etd > etdTo) return false
+      if (mobisOnly && !b.forwarder_handler?.customers?.includes('모비스 AS(20010)')) return false
       return true
     })
 
@@ -251,12 +263,19 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
       for (const level of levels) {
         const va = getCellValue(a, level.col, customColumns)
         const vb = getCellValue(b, level.col, customColumns)
-        const cmp = va < vb ? -1 : va > vb ? 1 : 0
+        let cmp: number
+        if (level.col === 'final_destination' && destOrderMap) {
+          const ia = destOrderMap[va] ?? 9999
+          const ib = destOrderMap[vb] ?? 9999
+          cmp = ia - ib
+        } else {
+          cmp = va < vb ? -1 : va > vb ? 1 : 0
+        }
         if (cmp !== 0) return level.dir === 'asc' ? cmp : -cmp
       }
       return 0
     })
-  }, [bookings, etdFrom, etdTo, sort1, sort2, sort3, customColumns])
+  }, [bookings, etdFrom, etdTo, mobisOnly, sort1, sort2, sort3, customColumns, destOrderMap])
 
   const hasSorts = !!(sort1 || sort2 || sort3)
 
@@ -358,6 +377,10 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
               이번달
             </button>
           </div>
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" checked={mobisOnly} onChange={e => setMobisOnly(e.target.checked)} className="rounded" />
+            모비스 AS(20010) 담당건만
+          </label>
           <p className="text-sm text-gray-500">
             조회결과: <span className="font-semibold text-blue-700">{filtered.length}건</span>
           </p>
