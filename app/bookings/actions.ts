@@ -131,20 +131,38 @@ export async function bulkSaveBookings(
   await Promise.all([
     ...edits.map(async ({ id, data }) => {
       const d = normalize(data)
+      // voyage는 rpc()로 별도 저장 (PostgREST schema cache 우회)
+      const voyageValue = 'voyage' in d ? (d.voyage as string) : undefined
+      delete d.voyage
       // updated_etd가 실제로 변경됐으면 이전 값을 updated_etd_prev에 저장
       if (id in currentEtdMap) {
         const prevEtd = currentEtdMap[id]
         const newEtd = (d.updated_etd as string | null | undefined) ?? null
         if (prevEtd !== newEtd) d.updated_etd_prev = prevEtd
       }
-      const { error } = await supabase.from('bookings').update(d).eq('id', id)
-      if (error) errors[id] = error.message
+      if (Object.keys(d).length > 0) {
+        const { error } = await supabase.from('bookings').update(d).eq('id', id)
+        if (error) errors[id] = error.message
+      }
+      if (voyageValue !== undefined && !errors[id]) {
+        const { error } = await supabase.rpc('update_booking_voyage', { booking_id: id, new_voyage: voyageValue })
+        if (error) errors[id] = error.message
+      }
     }),
     ...inserts.map(async ({ tempId, data }) => {
-      const { error } = await supabase
+      const d = normalize(data)
+      const voyageValue = 'voyage' in d ? (d.voyage as string) : undefined
+      delete d.voyage
+      const { data: newRow, error } = await supabase
         .from('bookings')
-        .insert({ ...normalize(data), created_by: user.id })
-      if (error) errors[tempId] = error.message
+        .insert({ ...d, created_by: user.id })
+        .select('id')
+        .single()
+      if (error) { errors[tempId] = error.message; return }
+      if (voyageValue !== undefined && newRow?.id) {
+        const { error: ve } = await supabase.rpc('update_booking_voyage', { booking_id: newRow.id, new_voyage: voyageValue })
+        if (ve) errors[tempId] = ve.message
+      }
     }),
   ])
 
