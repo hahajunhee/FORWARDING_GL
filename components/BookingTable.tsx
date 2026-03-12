@@ -343,9 +343,17 @@ function BookingEntriesEditor({ entries, onChange }: {
 // YYYYMMDD → YYYY-MM-DD 자동 변환
 function normalizeDateInput(v: string): string | null {
   if (!v) return null
-  const digits = v.replace(/[^0-9]/g, '')
+  const t = v.trim()
+  // MM/DD or M/D → 올해 연도 적용
+  const slashMatch = t.match(/^(\d{1,2})\/(\d{1,2})$/)
+  if (slashMatch) {
+    const year = new Date().getFullYear()
+    return `${year}-${slashMatch[1].padStart(2, '0')}-${slashMatch[2].padStart(2, '0')}`
+  }
+  // YYYYMMDD (8자리 숫자) → YYYY-MM-DD
+  const digits = t.replace(/[^0-9]/g, '')
   if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
-  return v || null
+  return t || null
 }
 
 // ── 자동완성 입력 ─────────────────────────────────────────────────
@@ -1020,6 +1028,72 @@ export default function BookingTable({
 
   // ── 편집 데이터 관리 ───────────────────────────────────────────────
 
+  // TSV 붙여넣기: 텍스트 값 → Booking 필드 변환
+  function textToCellChange(col: string, value: string): Partial<Booking> | null {
+    const v = value.trim()
+    const dateVal = normalizeDateInput(v)
+    switch (col) {
+      case 'final_destination': return { final_destination: v }
+      case 'discharge_port': return { discharge_port: v }
+      case 'carrier': return { carrier: v }
+      case 'vessel_name': return { vessel_name: v.toUpperCase() }
+      case 'voyage': return { voyage: v }
+      case 'secured_space': return { secured_space: v }
+      case 'mqc': return { mqc: v }
+      case 'customer_doc_handler': return { customer_doc_handler: v }
+      case 'doc_cutoff_date': return { doc_cutoff_date: dateVal }
+      case 'proforma_etd': return { proforma_etd: dateVal }
+      case 'updated_etd': return { updated_etd: dateVal }
+      case 'eta': return { eta: dateVal }
+      case 'remarks': return { remarks: v }
+      default: {
+        const cd = customColumns.find(c => c.key === col)
+        if (cd && col !== 'custom_mmgcysit') {
+          return { extra_data: { [col]: v } as Record<string, string> }
+        }
+        return null
+      }
+    }
+  }
+
+  const handleTablePaste = (e: React.ClipboardEvent) => {
+    if (!editMode || !cellSelStart) return
+    const target = e.target as HTMLElement
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return
+    const text = e.clipboardData.getData('text/plain')
+    if (!text) return
+    e.preventDefault()
+    const pasteRows = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd().split('\n').map(r => r.split('\t'))
+    const startRow = cellSelStart.rowIdx
+    const startCol = cellSelStart.colIdx
+    const batchEdits: Record<string, Partial<Booking>> = {}
+    for (let ri = 0; ri < pasteRows.length; ri++) {
+      const booking = processedRef.current[startRow + ri]
+      if (!booking) continue
+      if (booking.forwarder_handler_id !== currentUserId && !pasteRows[ri].some((_, ci) => colsToRender[startCol + ci] === 'forwarder_handler')) continue
+      const changes: Partial<Booking> = {}
+      for (let ci = 0; ci < pasteRows[ri].length; ci++) {
+        const col = colsToRender[startCol + ci]
+        if (!col) continue
+        const change = textToCellChange(col, pasteRows[ri][ci])
+        if (!change) continue
+        if (change.extra_data) {
+          changes.extra_data = { ...((changes.extra_data as Record<string, string>) || {}), ...(change.extra_data as Record<string, string>) }
+        } else {
+          Object.assign(changes, change)
+        }
+      }
+      if (Object.keys(changes).length > 0) batchEdits[booking.id] = changes
+    }
+    setRowEdits(prev => {
+      const next = { ...prev }
+      for (const [id, changes] of Object.entries(batchEdits)) {
+        next[id] = { ...(next[id] || {}), ...changes }
+      }
+      return next
+    })
+  }
+
   const handleRowChange = (id: string, changes: Partial<Booking>) =>
     setRowEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...changes } }))
 
@@ -1586,7 +1660,8 @@ export default function BookingTable({
       {/* 테이블 */}
       <div className="flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-200"
         onMouseUp={() => { isMouseSelecting.current = false }}
-        onMouseLeave={() => { isMouseSelecting.current = false }}>
+        onMouseLeave={() => { isMouseSelecting.current = false }}
+        onPaste={handleTablePaste}>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-20">
               <tr className="bg-gray-50">
