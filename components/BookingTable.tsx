@@ -100,6 +100,19 @@ function getEtdClass(d: string | null | undefined): string {
   } catch { return '' }
 }
 
+// 부킹수량 자동계산 (20ft = 0.5, 40ft = 1) — 날짜 조건 없음
+export function calcTotalQty(b: Partial<Booking>): number {
+  if (b.booking_entries && b.booking_entries.length > 0) {
+    return b.booking_entries.reduce((sum, e) => {
+      const mult = e.ctr_type.startsWith('20') ? 0.5 : 1
+      return sum + (e.ctr_qty || 0) * mult
+    }, 0)
+  }
+  const qty20 = (b.qty_20_normal || 0) + (b.qty_20_dg || 0) + (b.qty_20_reefer || 0)
+  const qty40 = (b.qty_40_normal || 0) + (b.qty_40_dg || 0) + (b.qty_40_reefer || 0)
+  return qty20 * 0.5 + qty40
+}
+
 export function formatContainers(b: Partial<Booking>): string {
   if (b.booking_entries && b.booking_entries.length > 0) {
     return b.booking_entries.map(e => `${e.ctr_type}×${e.ctr_qty}`).join(' / ')
@@ -435,6 +448,11 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
     case 'remarks':
       return <input autoFocus={autoFocus} className={cls} value={row.remarks || ''} onChange={e => onChange({ remarks: e.target.value })} placeholder="비고" />
     default: {
+      // custom_mmgcysit: 부킹수량 자동계산 열 (편집 불가)
+      if (colKey === 'custom_mmgcysit') {
+        const qty = calcTotalQty(row as Partial<Booking>)
+        return <span className="text-xs text-gray-500 italic px-1.5">{qty > 0 ? (qty % 1 === 0 ? qty : qty.toFixed(1)) : '-'} (자동)</span>
+      }
       const cd = customColumns.find(c => c.key === colKey)
       if (cd) {
         const value = (row.extra_data as Record<string, string> | null)?.[colKey] || ''
@@ -535,6 +553,12 @@ function ViewCell({ colKey, booking, currentUserId, customColumns }: {
     case 'remarks':
       return <span className="truncate block text-xs text-gray-500 max-w-[160px]" title={booking.remarks}>{booking.remarks || '-'}</span>
     default: {
+      // custom_mmgcysit: 부킹수량 자동계산 열
+      if (colKey === 'custom_mmgcysit') {
+        const qty = calcTotalQty(booking)
+        if (qty === 0) return <span className="text-gray-300 text-xs">-</span>
+        return <span className="text-xs font-semibold text-blue-700">{qty % 1 === 0 ? qty : qty.toFixed(1)}</span>
+      }
       const cd = customColumns.find(c => c.key === colKey)
       if (cd) {
         const val = (booking.extra_data as Record<string, string> | null)?.[colKey] || ''
@@ -737,6 +761,7 @@ export default function BookingTable({
       case 'eta': return fmtDate(booking.eta)
       case 'containers': return formatContainers(booking)
       case 'final_qty': { const q = calcFinalQty(booking); return q === null ? '' : (q % 1 === 0 ? String(q) : q.toFixed(1)) }
+      case 'custom_mmgcysit': { const q = calcTotalQty(booking); return q > 0 ? (q % 1 === 0 ? String(q) : q.toFixed(1)) : '' }
       case 'remarks': return booking.remarks || ''
       default: {
         const cd = customColumns.find(c => c.key === col)

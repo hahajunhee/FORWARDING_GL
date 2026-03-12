@@ -4,7 +4,7 @@ import { useState, useMemo, useTransition, useEffect } from 'react'
 import { format, parseISO, isValid } from 'date-fns'
 import type { Booking, ColumnDefinition } from '@/types'
 import { COLUMN_LABELS, DEFAULT_COLUMN_ORDER } from '@/types'
-import { formatContainers } from './BookingTable'
+import { formatContainers, calcTotalQty } from './BookingTable'
 import { saveGlobalScheduleCols } from '@/app/settings/actions'
 
 // 기본 열 (containers 포함, 가상 열 포함, final_qty 제외)
@@ -48,6 +48,10 @@ function getCellValue(booking: Booking, col: string, customCols: ColumnDefinitio
     case 'eta': return fmtDate(booking.eta)
     case 'containers': return formatContainers(booking)
     case 'remarks': return booking.remarks || ''
+    case 'custom_mmgcysit': {
+      const qty = calcTotalQty(booking)
+      return qty > 0 ? (qty % 1 === 0 ? String(qty) : qty.toFixed(1)) : ''
+    }
     default: {
       const cd = customCols.find(c => c.key === col)
       if (cd) return (booking.extra_data as Record<string, string> | null)?.[col] || ''
@@ -116,6 +120,49 @@ function buildHierarchicalSpans(rows: Booking[]): Record<string, number[]> {
   return result
 }
 
+// 모선명+항차 기준 행 합산
+function mergeByVoyage(bookings: Booking[]): Booking[] {
+  const groups = new Map<string, Booking[]>()
+  const order: string[] = []
+  for (const b of bookings) {
+    const key = (b.vessel_name && b.voyage) ? `${b.vessel_name}|||${b.voyage}` : `__solo_${b.id}`
+    if (!groups.has(key)) { groups.set(key, []); order.push(key) }
+    groups.get(key)!.push(b)
+  }
+  return order.map(key => {
+    const group = groups.get(key)!
+    if (group.length === 1) return group[0]
+    // 날짜는 updated_at 기준 최신 부킹 사용
+    const repr = group.reduce((a, b) => (a.updated_at || '') >= (b.updated_at || '') ? a : b)
+    const sumNum = (field: keyof Booking) => group.reduce((s, b) => s + (((b[field] as number) || 0)), 0)
+    const sumStr = (field: keyof Booking) => {
+      const t = group.reduce((s, b) => s + (parseFloat((b[field] as string) || '0') || 0), 0)
+      return t > 0 ? String(t) : ''
+    }
+    const uniq = (vals: (string | null | undefined)[]) => [...new Set(vals.filter(Boolean) as string[])].join(' / ')
+    const allEntries = group.flatMap(b => b.booking_entries || [])
+    return {
+      ...repr,
+      id: group[0].id,
+      booking_no: uniq(group.map(b => b.booking_no)),
+      booking_entries: allEntries.length > 0 ? allEntries : null,
+      final_destination: uniq(group.map(b => b.final_destination)),
+      discharge_port: uniq(group.map(b => b.discharge_port)),
+      carrier: uniq(group.map(b => b.carrier)),
+      secured_space: sumStr('secured_space'),
+      mqc: sumStr('mqc'),
+      customer_doc_handler: uniq(group.map(b => b.customer_doc_handler)),
+      qty_20_normal: sumNum('qty_20_normal'),
+      qty_20_dg: sumNum('qty_20_dg'),
+      qty_20_reefer: sumNum('qty_20_reefer'),
+      qty_40_normal: sumNum('qty_40_normal'),
+      qty_40_dg: sumNum('qty_40_dg'),
+      qty_40_reefer: sumNum('qty_40_reefer'),
+      remarks: uniq(group.map(b => b.remarks)),
+    } as Booking
+  })
+}
+
 type SortLevel = { col: string; dir: 'asc' | 'desc' } | null
 
 interface Props {
@@ -140,6 +187,7 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
   const [sort2, _setSort2] = useState<SortLevel>(null)
   const [sort3, _setSort3] = useState<SortLevel>(null)
   const [mergeEnabled, _setMergeEnabled] = useState(true)
+  const [voyageMerge, _setVoyageMerge] = useState(false)
   const [mobisOnly, setMobisOnly] = useState(false)
 
   useEffect(() => {
@@ -152,6 +200,8 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
       if (s3) _setSort3(JSON.parse(s3))
       const me = localStorage.getItem('sched_mergeEnabled')
       if (me !== null) _setMergeEnabled(me === 'true')
+      const vm = localStorage.getItem('sched_voyageMerge')
+      if (vm !== null) _setVoyageMerge(vm === 'true')
     } catch {}
   }, [])
 
@@ -160,6 +210,7 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
   const setSort2 = (v: SortLevel) => { _setSort2(v); ls('sched_sort2', JSON.stringify(v)) }
   const setSort3 = (v: SortLevel) => { _setSort3(v); ls('sched_sort3', JSON.stringify(v)) }
   const setMergeEnabled = (v: boolean) => { _setMergeEnabled(v); ls('sched_mergeEnabled', String(v)) }
+  const setVoyageMerge = (v: boolean) => { _setVoyageMerge(v); ls('sched_voyageMerge', String(v)) }
 
   // 전체 저장 UI
   const [savePassword, setSavePassword] = useState('')
@@ -279,16 +330,22 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
 
   const hasSorts = !!(sort1 || sort2 || sort3)
 
+  // 모선명/항차 합산 적용
+  const displayRows = useMemo(() => {
+    if (!voyageMerge) return filtered
+    return mergeByVoyage(filtered)
+  }, [filtered, voyageMerge])
+
   // rowSpan 계산 (병합 활성 시 — 최종도착지/양하항/선사만 계층 병합)
   const rowSpanMap = useMemo(() => {
-    if (!mergeEnabled || !hasSorts || filtered.length === 0) return null
-    return buildHierarchicalSpans(filtered)
-  }, [filtered, mergeEnabled, hasSorts])
+    if (!mergeEnabled || !hasSorts || displayRows.length === 0) return null
+    return buildHierarchicalSpans(displayRows)
+  }, [displayRows, mergeEnabled, hasSorts])
 
   const exportToExcel = () => {
     import('xlsx').then((XLSX) => {
       const header = selectedCols.map(c => allLabels[c] || c)
-      const rows = filtered.map(b => selectedCols.map(c => getExcelValue(b, c, customColumns)))
+      const rows = displayRows.map(b => selectedCols.map(c => getExcelValue(b, c, customColumns)))
       const ws = XLSX.utils.aoa_to_sheet([header, ...rows], { cellDates: true, dateNF: 'yyyy-mm-dd' })
       ws['!cols'] = header.map((h, i) => ({
         wch: Math.max(h.length + 2, ...rows.map(r => {
@@ -381,8 +438,15 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
             <input type="checkbox" checked={mobisOnly} onChange={e => setMobisOnly(e.target.checked)} className="rounded" />
             모비스 AS(20010) 담당건만
           </label>
+          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+            <input type="checkbox" checked={voyageMerge} onChange={e => setVoyageMerge(e.target.checked)} className="rounded" />
+            모선명/항차 동일 시 행 합산 (MQC·확보선복·부킹수량 합계, 날짜는 최신 기준)
+          </label>
           <p className="text-sm text-gray-500">
-            조회결과: <span className="font-semibold text-blue-700">{filtered.length}건</span>
+            조회결과: <span className="font-semibold text-blue-700">{displayRows.length}건</span>
+            {voyageMerge && filtered.length !== displayRows.length && (
+              <span className="text-xs text-gray-400 ml-1">(합산 전 {filtered.length}건)</span>
+            )}
           </p>
         </div>
 
@@ -481,11 +545,11 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
       </div>
 
       {/* 미리보기 테이블 */}
-      {filtered.length > 0 && selectedCols.length > 0 ? (
+      {displayRows.length > 0 && selectedCols.length > 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
             <span className="text-xs font-medium text-gray-600">미리보기</span>
-            <span className="text-xs text-gray-400">{filtered.length}건</span>
+            <span className="text-xs text-gray-400">{displayRows.length}건{voyageMerge && filtered.length !== displayRows.length ? ` (합산 전 ${filtered.length}건)` : ''}</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs border-collapse">
@@ -499,7 +563,7 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((booking, rowIdx) => {
+                {displayRows.map((booking, rowIdx) => {
                   const hasVisibleCells = !rowSpanMap || selectedCols.some(col => (rowSpanMap[col]?.[rowIdx] ?? 1) !== 0)
                   if (!hasVisibleCells) return null
 
@@ -528,7 +592,7 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 py-12 text-center text-gray-400">
           <p className="text-sm">
-            {filtered.length === 0 ? '해당 기간에 부킹이 없습니다.' : '열을 하나 이상 선택해주세요.'}
+            {displayRows.length === 0 ? '해당 기간에 부킹이 없습니다.' : '열을 하나 이상 선택해주세요.'}
           </p>
         </div>
       )}
