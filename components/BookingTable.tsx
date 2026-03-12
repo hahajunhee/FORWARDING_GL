@@ -649,6 +649,13 @@ export default function BookingTable({
   const [validationErrors, setValidationErrors] = useState<{ field: string; value: string }[]>([])
   const [sortsSaved, setSortsSaved] = useState(false)
 
+  // ── 엑셀식 셀 범위 선택 ──────────────────────────────────────────
+  const [cellSelStart, setCellSelStart] = useState<{ rowIdx: number; colIdx: number } | null>(null)
+  const [cellSelEnd, setCellSelEnd] = useState<{ rowIdx: number; colIdx: number } | null>(null)
+  const isMouseSelecting = useRef(false)
+  const processedRef = useRef(processed)
+  useEffect(() => { processedRef.current = processed }, [processed])
+
   // 마운트 시 localStorage에서 복원 (raw setter 사용 → 저장 루프 없음)
   useEffect(() => {
     try {
@@ -706,6 +713,92 @@ export default function BookingTable({
       return next
     })
   }
+
+  // 셀 텍스트 값 (복사용)
+  function getCellTextValue(booking: Booking, col: string): string {
+    switch (col) {
+      case 'booking_no':
+        if (booking.booking_entries && booking.booking_entries.length > 0)
+          return booking.booking_entries.map(e => e.no).join(' / ')
+        return booking.booking_no || ''
+      case 'final_destination': return booking.final_destination || ''
+      case 'discharge_port': return booking.discharge_port || ''
+      case 'carrier': return booking.carrier || ''
+      case 'vessel_name': return booking.vessel_name || ''
+      case 'voyage': return booking.voyage || ''
+      case 'secured_space': return booking.secured_space || ''
+      case 'mqc': return booking.mqc || ''
+      case 'customer_doc_handler': return booking.customer_doc_handler || ''
+      case 'forwarder_handler': return booking.forwarder_handler?.name || ''
+      case 'handler_region': return booking.forwarder_handler?.region || ''
+      case 'handler_customers': return booking.forwarder_handler?.customers || ''
+      case 'doc_cutoff_date': return fmtDate(booking.doc_cutoff_date)
+      case 'proforma_etd': return fmtDate(booking.proforma_etd)
+      case 'updated_etd': return fmtDate(booking.updated_etd)
+      case 'eta': return fmtDate(booking.eta)
+      case 'containers': return formatContainers(booking)
+      case 'final_qty': { const q = calcFinalQty(booking); return q === null ? '' : (q % 1 === 0 ? String(q) : q.toFixed(1)) }
+      case 'remarks': return booking.remarks || ''
+      default: {
+        const cd = customColumns.find(c => c.key === col)
+        if (cd) return (booking.extra_data as Record<string, string> | null)?.[col] || ''
+        return ''
+      }
+    }
+  }
+
+  function isCellInRange(rowIdx: number, colIdx: number): boolean {
+    if (!cellSelStart || !cellSelEnd) return false
+    const minR = Math.min(cellSelStart.rowIdx, cellSelEnd.rowIdx)
+    const maxR = Math.max(cellSelStart.rowIdx, cellSelEnd.rowIdx)
+    const minC = Math.min(cellSelStart.colIdx, cellSelEnd.colIdx)
+    const maxC = Math.max(cellSelStart.colIdx, cellSelEnd.colIdx)
+    return rowIdx >= minR && rowIdx <= maxR && colIdx >= minC && colIdx <= maxC
+  }
+
+  // Ctrl+C: 선택 범위 클립보드 복사
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== 'c') return
+      if (!cellSelStart || !cellSelEnd) return
+      const active = document.activeElement
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return
+      const minR = Math.min(cellSelStart.rowIdx, cellSelEnd.rowIdx)
+      const maxR = Math.max(cellSelStart.rowIdx, cellSelEnd.rowIdx)
+      const minC = Math.min(cellSelStart.colIdx, cellSelEnd.colIdx)
+      const maxC = Math.max(cellSelStart.colIdx, cellSelEnd.colIdx)
+      const rows: string[][] = []
+      for (let r = minR; r <= maxR; r++) {
+        const bk = processedRef.current[r]
+        if (!bk) continue
+        const row: string[] = []
+        for (let c = minC; c <= maxC; c++) {
+          const col = colsToRender[c]
+          if (col) row.push(getCellTextValue(bk, col))
+        }
+        rows.push(row)
+      }
+      const tsv = rows.map(r => r.join('\t')).join('\n')
+      const htmlRows = rows.map(r =>
+        '<tr>' + r.map(v => `<td style="padding:2px 6px;">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>`).join('') + '</tr>'
+      ).join('')
+      const html = `<table style="font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10pt;border-collapse:collapse;">${htmlRows}</table>`
+      e.preventDefault()
+      try {
+        navigator.clipboard.write([
+          new ClipboardItem({
+            'text/plain': new Blob([tsv], { type: 'text/plain' }),
+            'text/html': new Blob([html], { type: 'text/html' }),
+          })
+        ])
+      } catch {
+        navigator.clipboard.writeText(tsv)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cellSelStart, cellSelEnd, colsToRender])
 
   const destinations = useMemo(() => {
     const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
@@ -1033,6 +1126,7 @@ export default function BookingTable({
   function renderDataRow(
     booking: Booking,
     rowSpans: Record<string, { span: number; skip: boolean }>,
+    rowIdx: number,
     prevBooking?: Booking | null,
     nextBooking?: Booking | null,
   ) {
@@ -1122,10 +1216,22 @@ export default function BookingTable({
           const tdIsGroupEnd = isMergedSpan ? true : isGroupEnd
           const canEditCell = editMode && (isOwnBooking || col === 'forwarder_handler')
           const isActive = canEditCell && activeCell?.id === booking.id && activeCell?.col === col
+          const colIdx = colsToRender.indexOf(col)
+          const isCellSel = isCellInRange(rowIdx, colIdx)
 
           return (
             <td key={col}
               rowSpan={rowSpan}
+              onMouseDown={e => {
+                if (e.button !== 0) return
+                isMouseSelecting.current = true
+                setCellSelStart({ rowIdx, colIdx })
+                setCellSelEnd({ rowIdx, colIdx })
+              }}
+              onMouseEnter={() => {
+                if (!isMouseSelecting.current) return
+                setCellSelEnd({ rowIdx, colIdx })
+              }}
               onClick={canEditCell
                 ? () => setActiveCell({ id: booking.id, col })
                 : (!editMode && isDocCol && booking.doc_cutoff_date ? () => setDocFilter(v => !v) : undefined)
@@ -1140,12 +1246,14 @@ export default function BookingTable({
               style={{
                 minWidth: colWidths[col] || def.minW,
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
-                ...(isPinned ? { backgroundColor: handlerColor || 'white' } : {}),
+                ...(isPinned ? { backgroundColor: isCellSel ? '#bfdbfe' : (handlerColor || 'white') } : {}),
+                ...(isCellSel && !isPinned ? { backgroundColor: '#dbeafe' } : {}),
                 borderTop: isActive ? '2px solid #ef4444' : tdIsGroupStart ? groupBorder : '1px solid transparent',
                 borderBottom: isActive ? '2px solid #ef4444' : tdIsGroupEnd ? groupBorder : '1px solid transparent',
-                borderLeft: isActive ? '2px solid #ef4444' : colBorder,
-                borderRight: isActive ? '2px solid #ef4444' : colBorder,
+                borderLeft: isActive ? '2px solid #ef4444' : isCellSel ? '1px solid #93c5fd' : colBorder,
+                borderRight: isActive ? '2px solid #ef4444' : isCellSel ? '1px solid #93c5fd' : colBorder,
                 ...(isMergedSpan ? { verticalAlign: 'middle' } : {}),
+                userSelect: 'none',
               }}>
               {canEditCell
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} />
@@ -1191,20 +1299,23 @@ export default function BookingTable({
   function renderBody() {
     const effectiveMerge = mergeEnabled && !editMode
 
-    function renderRows(rows: Booking[]) {
+    function renderRows(rows: Booking[], baseRowIdx: number = 0) {
       const spanMaps = buildSpanMaps(rows, effectiveMerge)
       return rows.map((b, i) => {
         const rowSpans: Record<string, SpanInfo> = {}
         for (const col of MERGE_HIERARCHY) rowSpans[col] = spanMaps[col][i]
-        return renderDataRow(b, rowSpans, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null)
+        return renderDataRow(b, rowSpans, baseRowIdx + i, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null)
       })
     }
 
     if (monthView && monthGroups) {
+      let offset = 0
       return (
         <>
           {monthGroups.map(({ key, rows }) => {
             const collapsed = collapsedMonths.has(key)
+            const base = offset
+            offset += rows.length
             return (
               <>
                 <tr key={`hd-${key}`} className="bg-gray-100 cursor-pointer select-none"
@@ -1215,7 +1326,7 @@ export default function BookingTable({
                     <span className="ml-2 font-normal text-gray-400">({rows.length}건)</span>
                   </td>
                 </tr>
-                {!collapsed && renderRows(rows)}
+                {!collapsed && renderRows(rows, base)}
               </>
             )
           })}
@@ -1436,7 +1547,9 @@ export default function BookingTable({
       )}
 
       {/* 테이블 */}
-      <div className="flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-200">
+      <div className="flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-200"
+        onMouseUp={() => { isMouseSelecting.current = false }}
+        onMouseLeave={() => { isMouseSelecting.current = false }}>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-20">
               <tr className="bg-gray-50">
