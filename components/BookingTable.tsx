@@ -653,7 +653,7 @@ export default function BookingTable({
   const [cellSelStart, setCellSelStart] = useState<{ rowIdx: number; colIdx: number } | null>(null)
   const [cellSelEnd, setCellSelEnd] = useState<{ rowIdx: number; colIdx: number } | null>(null)
   const isMouseSelecting = useRef(false)
-  const processedRef = useRef(processed)
+  const processedRef = useRef<Booking[]>([])
   useEffect(() => { processedRef.current = processed }, [processed])
 
   // 마운트 시 localStorage에서 복원 (raw setter 사용 → 저장 루프 없음)
