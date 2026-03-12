@@ -781,6 +781,15 @@ export default function BookingTable({
   }
 
 
+  // 최종도착지별 행 배경색 맵
+  const destinationColorMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const l of customLists) {
+      if (l.list_type === 'destination' && l.color) map[l.name] = l.color
+    }
+    return map
+  }, [customLists])
+
   const destinations = useMemo(() => {
     const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
     return c.length > 0 ? c : [...DEFAULT_DESTINATIONS]
@@ -1162,7 +1171,7 @@ export default function BookingTable({
     const merged: Partial<Booking> = { ...booking, ...edits }
     const hasEdits = Object.keys(edits).length > 0
     const err = rowErrors[booking.id]
-    const handlerColor = booking.forwarder_handler?.color || ''
+    const handlerColor = destinationColorMap[booking.final_destination || ''] || ''
     const isOwnBooking = booking.forwarder_handler_id === currentUserId
 
     const isGroupStart = !prevBooking || !isSameGroup(booking, prevBooking)

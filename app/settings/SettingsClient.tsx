@@ -6,7 +6,7 @@ import {
   addCustomListItem, deleteCustomListItem, updateCustomListItem,
   saveColumnSettings, addColumnDefinition, removeColumnDefinition,
   saveCustomListOrder, saveMyProfile, updateColumnDescription, saveBaseColDescriptions,
-  saveMyColor, saveBaseColLabels, saveDestinationSortOrder,
+  saveMyColor, saveBaseColLabels, saveDestinationSortOrder, updateCustomListColor,
 } from './actions'
 import type { CustomList, ColumnDefinition } from '@/types'
 import { DEFAULT_DESTINATIONS, MAJOR_PORTS, CARRIERS, DEFAULT_COLUMN_ORDER, COLUMN_LABELS } from '@/types'
@@ -99,6 +99,31 @@ function ListManager({ listType, items, defaultItems, placeholder }: ListManager
                     <button onClick={() => moveItem(idx, 'down')} disabled={idx === orderedItems.length - 1 || isPending}
                       className="w-5 h-4 text-gray-300 hover:text-gray-600 disabled:opacity-20 text-xs leading-none text-center">↓</button>
                   </div>
+                  {listType === 'destination' && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="color"
+                        value={item.color || '#ffffff'}
+                        onChange={e => {
+                          const newColor = e.target.value
+                          setOrderedItems(prev => prev.map(i => i.id === item.id ? { ...i, color: newColor } : i))
+                          startTransition(async () => { await updateCustomListColor(item.id, newColor) })
+                        }}
+                        title="행 배경색"
+                        className="w-6 h-6 rounded cursor-pointer border border-gray-200 p-0"
+                      />
+                      {item.color && (
+                        <button
+                          onClick={() => {
+                            setOrderedItems(prev => prev.map(i => i.id === item.id ? { ...i, color: null } : i))
+                            startTransition(async () => { await updateCustomListColor(item.id, null) })
+                          }}
+                          className="text-gray-300 hover:text-gray-500 text-xs leading-none"
+                          title="색상 제거"
+                        >✕</button>
+                      )}
+                    </div>
+                  )}
                   <span className="flex-1 text-sm text-gray-800">{item.name}</span>
                   <button onClick={() => { setEditingId(item.id); setEditingName(item.name) }}
                     className="text-xs px-2 py-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors">수정</button>

@@ -87,6 +87,7 @@ export interface CustomList {
   user_id: string
   list_type: 'destination' | 'port' | 'carrier'
   name: string
+  color: string | null
   sort_order: number
   created_at: string
 }

@@ -39,6 +39,22 @@ export async function deleteCustomListItem(id: string): Promise<void> {
   revalidatePath('/bookings')
 }
 
+export async function updateCustomListColor(id: string, color: string | null): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('custom_lists')
+    .update({ color: color || null })
+    .eq('id', id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/settings')
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 export async function updateCustomListItem(id: string, name: string): Promise<{ error: string | null }> {
   const trimmed = name.trim()
   if (!trimmed) return { error: '이름을 입력해주세요.' }
