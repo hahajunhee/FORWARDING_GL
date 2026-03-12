@@ -755,7 +755,34 @@ export default function BookingTable({
     return rowIdx >= minR && rowIdx <= maxR && colIdx >= minC && colIdx <= maxC
   }
 
-  // Ctrl+C: 선택 범위 클립보드 복사
+
+  const destinations = useMemo(() => {
+    const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
+    return c.length > 0 ? c : [...DEFAULT_DESTINATIONS]
+  }, [customLists])
+
+  const ports = useMemo(() => {
+    const c = customLists.filter(l => l.list_type === 'port').map(l => l.name)
+    return c.length > 0 ? c : [...MAJOR_PORTS]
+  }, [customLists])
+
+  const carriers = useMemo(() => {
+    const c = customLists.filter(l => l.list_type === 'carrier').map(l => l.name)
+    return c.length > 0 ? c : [...CARRIERS]
+  }, [customLists])
+
+  const carrierOptions = useMemo(() =>
+    Array.from(new Set(bookings.map(b => b.carrier).filter(Boolean))).sort()
+  , [bookings])
+
+  // 고정열 먼저, 이동가능 열은 colOrder 순서
+  const colsToRender = useMemo(() => {
+    const validPinned = pinnedColumns.filter(k => allColDefs[k])
+    const movable = colOrder.filter(k => allColDefs[k] && !pinnedColumns.includes(k))
+    return [...validPinned, ...movable]
+  }, [colOrder, pinnedColumns, allColDefs])
+
+  // Ctrl+C: 선택 범위 클립보드 복사 (colsToRender, processed 이후에 위치해야 함)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.key !== 'c') return
@@ -798,32 +825,6 @@ export default function BookingTable({
     return () => window.removeEventListener('keydown', handler)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cellSelStart, cellSelEnd, colsToRender])
-
-  const destinations = useMemo(() => {
-    const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
-    return c.length > 0 ? c : [...DEFAULT_DESTINATIONS]
-  }, [customLists])
-
-  const ports = useMemo(() => {
-    const c = customLists.filter(l => l.list_type === 'port').map(l => l.name)
-    return c.length > 0 ? c : [...MAJOR_PORTS]
-  }, [customLists])
-
-  const carriers = useMemo(() => {
-    const c = customLists.filter(l => l.list_type === 'carrier').map(l => l.name)
-    return c.length > 0 ? c : [...CARRIERS]
-  }, [customLists])
-
-  const carrierOptions = useMemo(() =>
-    Array.from(new Set(bookings.map(b => b.carrier).filter(Boolean))).sort()
-  , [bookings])
-
-  // 고정열 먼저, 이동가능 열은 colOrder 순서
-  const colsToRender = useMemo(() => {
-    const validPinned = pinnedColumns.filter(k => allColDefs[k])
-    const movable = colOrder.filter(k => allColDefs[k] && !pinnedColumns.includes(k))
-    return [...validPinned, ...movable]
-  }, [colOrder, pinnedColumns, allColDefs])
 
   const processed = useMemo(() => {
     let result = bookings.filter(b => {
