@@ -41,7 +41,7 @@ export default async function BookingsPage() {
 
   return (
     <BookingPageLayout
-      bookings={(bookings || []) as Booking[]}
+      bookings={(bookings || []) as unknown as Booking[]}
       profiles={(profiles || []) as Profile[]}
       currentUserId={user.id}
       currentUserEmail={user.email || ''}
