@@ -654,7 +654,6 @@ export default function BookingTable({
   const [cellSelEnd, setCellSelEnd] = useState<{ rowIdx: number; colIdx: number } | null>(null)
   const isMouseSelecting = useRef(false)
   const processedRef = useRef<Booking[]>([])
-  useEffect(() => { processedRef.current = processed }, [processed])
 
   // 마운트 시 localStorage에서 복원 (raw setter 사용 → 저장 루프 없음)
   useEffect(() => {
@@ -868,6 +867,9 @@ export default function BookingTable({
     }
     return result
   }, [bookings, viewMode, carrierFilter, handlerFilter, regionFilter, customersFilter, etdFrom, etdTo, docFilter, sorts, currentUserId, customColumns])
+
+  // processedRef를 항상 최신 processed로 동기화
+  useEffect(() => { processedRef.current = processed }, [processed])
 
   const monthGroups = useMemo(() => {
     if (!monthView) return null
