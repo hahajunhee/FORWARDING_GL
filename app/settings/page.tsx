@@ -39,7 +39,6 @@ export default async function SettingsPage() {
       columnOrder={profile?.column_order || DEFAULT_COLUMN_ORDER}
       pinnedColumns={profile?.pinned_columns || DEFAULT_PINNED_COLUMNS}
       columnDefinitions={(columnDefinitions || []) as ColumnDefinition[]}
-      currentColor={profile?.color || null}
       currentName={profile?.name || ''}
       currentRegion={profile?.region || ''}
       currentCustomers={profile?.customers || ''}

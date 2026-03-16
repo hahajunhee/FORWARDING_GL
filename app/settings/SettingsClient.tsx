@@ -6,7 +6,7 @@ import {
   addCustomListItem, deleteCustomListItem, updateCustomListItem,
   saveColumnSettings, addColumnDefinition, removeColumnDefinition,
   saveCustomListOrder, saveMyProfile, updateColumnDescription, saveBaseColDescriptions,
-  saveMyColor, saveBaseColLabels, saveDestinationSortOrder, updateCustomListColor,
+  saveBaseColLabels, saveDestinationSortOrder, updateCustomListColor,
 } from './actions'
 import type { CustomList, ColumnDefinition } from '@/types'
 import { DEFAULT_DESTINATIONS, MAJOR_PORTS, CARRIERS, DEFAULT_COLUMN_ORDER, COLUMN_LABELS } from '@/types'
@@ -601,7 +601,6 @@ interface SettingsClientProps {
   columnOrder: string[]
   pinnedColumns: string[]
   columnDefinitions: ColumnDefinition[]
-  currentColor: string | null
   currentName: string
   currentRegion: string
   currentCustomers: string
@@ -614,7 +613,7 @@ interface SettingsClientProps {
 
 export default function SettingsClient({
   customLists, columnOrder, pinnedColumns, columnDefinitions,
-  currentColor, currentName, currentRegion, currentCustomers,
+  currentName, currentRegion, currentCustomers,
   regionList, customerList, baseColDescriptions, baseColLabels, destinationSortOrder,
 }: SettingsClientProps) {
   const [mainTab, setMainTab] = useState<MainTab>('lists')
@@ -626,9 +625,7 @@ export default function SettingsClient({
   const [profileSaving, setProfileSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [profileError, setProfileError] = useState<string | null>(null)
   const [, startProfileTransition] = useTransition()
-  const [profileColor, setProfileColor] = useState(currentColor || '')
-  const [colorSaving, setColorSaving] = useState<'idle' | 'saving' | 'saved'>('idle')
-  const [, startColorTransition] = useTransition()
+
 
   const handleSaveProfile = () => {
     setProfileError(null)
@@ -637,15 +634,6 @@ export default function SettingsClient({
       const result = await saveMyProfile(profileName, profileRegion, profileCustomers)
       if (result.error) { setProfileSaving('error'); setProfileError(result.error) }
       else { setProfileSaving('saved'); setTimeout(() => setProfileSaving('idle'), 2500) }
-    })
-  }
-
-  const handleSaveColor = () => {
-    setColorSaving('saving')
-    startColorTransition(async () => {
-      await saveMyColor(profileColor)
-      setColorSaving('saved')
-      setTimeout(() => setColorSaving('idle'), 2500)
     })
   }
 
@@ -824,40 +812,6 @@ export default function SettingsClient({
               {profileSaving === 'error' && <span className="text-sm text-red-600">{profileError || '저장 실패'}</span>}
             </div>
 
-            {/* 담당자 색상 */}
-            <div className="border-t border-gray-100 pt-5">
-              <h4 className="text-sm font-medium text-gray-900 mb-1">담당자 색상</h4>
-              <p className="text-xs text-gray-400 mb-3">부킹장에서 내 담당 행 배경색으로 표시됩니다.</p>
-              <div className="flex items-center gap-3">
-                <input
-                  type="color"
-                  value={profileColor || '#ffffff'}
-                  onChange={e => setProfileColor(e.target.value)}
-                  className="w-10 h-9 rounded-lg border border-gray-200 cursor-pointer p-0.5"
-                />
-                <input
-                  type="text"
-                  value={profileColor}
-                  onChange={e => setProfileColor(e.target.value)}
-                  placeholder="#rrggbb 또는 비워두면 색상 없음"
-                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                />
-                <button
-                  onClick={() => setProfileColor('')}
-                  className="text-xs px-3 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors">
-                  초기화
-                </button>
-                <button
-                  onClick={handleSaveColor}
-                  disabled={colorSaving === 'saving'}
-                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium">
-                  {colorSaving === 'saving' ? '저장 중...' : colorSaving === 'saved' ? '✓ 저장됨' : '저장'}
-                </button>
-              </div>
-              {profileColor && (
-                <div className="mt-2 h-6 rounded-lg border border-gray-200" style={{ backgroundColor: profileColor }} />
-              )}
-            </div>
           </div>
         )}
       </main>

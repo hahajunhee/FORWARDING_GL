@@ -1306,8 +1306,8 @@ export default function BookingTable({
       <td className={`table-td ${editMode ? 'sticky z-10' : ''}`}
         style={{
           ...(editMode ? { left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: isSelected ? '#eff6ff' : (handlerColor || 'white') } : {}),
-          borderTop: isGroupStart ? groupBorder : '1px solid transparent',
-          borderBottom: isGroupEnd ? groupBorder : '1px solid transparent',
+          borderTop: isGroupStart ? groupBorder : colBorder,
+          borderBottom: isGroupEnd ? groupBorder : 'none',
           borderLeft: colBorder,
           borderRight: colBorder,
         }}>
@@ -1392,12 +1392,11 @@ export default function BookingTable({
               }}
               onClick={canEditCell
                 ? () => setActiveCell({ id: booking.id, col })
-                : (!editMode && isDocCol && booking.doc_cutoff_date ? () => setDocFilter(v => !v) : undefined)
+                : undefined
               }
               className={`table-td text-xs
                 ${isPinned ? 'sticky z-10 bg-white' : ''}
                 ${dragOver === col && dragSrc !== col ? 'bg-blue-50' : ''}
-                ${!editMode && isDocCol && booking.doc_cutoff_date ? 'cursor-pointer hover:bg-red-50' : ''}
                 ${canEditCell ? 'p-0.5 cursor-pointer' : ''}
                 ${editMode && !isOwnBooking && col !== 'forwarder_handler' ? 'opacity-60' : ''}
               `}
@@ -1406,8 +1405,8 @@ export default function BookingTable({
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
                 ...(isPinned ? { backgroundColor: isCellSel ? '#bfdbfe' : (handlerColor || 'white') } : {}),
                 ...(isCellSel && !isPinned ? { backgroundColor: '#dbeafe' } : {}),
-                borderTop: isActive ? '2px solid #ef4444' : tdIsGroupStart ? groupBorder : '1px solid transparent',
-                borderBottom: isActive ? '2px solid #ef4444' : tdIsGroupEnd ? groupBorder : '1px solid transparent',
+                borderTop: isActive ? '2px solid #ef4444' : tdIsGroupStart ? groupBorder : (isMergeCol ? '1px solid transparent' : colBorder),
+                borderBottom: isActive ? '2px solid #ef4444' : tdIsGroupEnd ? groupBorder : (isMergeCol ? '1px solid transparent' : 'none'),
                 borderLeft: isActive ? '2px solid #ef4444' : isCellSel ? '1px solid #93c5fd' : colBorder,
                 borderRight: isActive ? '2px solid #ef4444' : isCellSel ? '1px solid #93c5fd' : colBorder,
                 ...(isMergedSpan ? { verticalAlign: 'middle' } : {}),
