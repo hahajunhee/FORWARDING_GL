@@ -686,6 +686,7 @@ export default function BookingTable({
   const [cellSelEnd, setCellSelEnd] = useState<{ rowIdx: number; colIdx: number } | null>(null)
   const isMouseSelecting = useRef(false)
   const processedRef = useRef<Booking[]>([])
+  const visualOrderRef = useRef<Booking[]>([])
 
   // 마운트 시 localStorage에서 복원 (raw setter 사용 → 저장 루프 없음)
   useEffect(() => {
@@ -830,14 +831,19 @@ export default function BookingTable({
       if (!(e.ctrlKey || e.metaKey) || e.key !== 'c') return
       if (!cellSelStart || !cellSelEnd) return
       const active = document.activeElement
-      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+        // INPUT 안에 텍스트가 선택돼 있으면 브라우저 기본 복사 허용
+        const inputEl = active as HTMLInputElement
+        if (inputEl.selectionStart !== null && inputEl.selectionStart !== inputEl.selectionEnd) return
+        // 선택된 텍스트 없으면 셀 범위 복사로 진행
+      }
       const minR = Math.min(cellSelStart.rowIdx, cellSelEnd.rowIdx)
       const maxR = Math.max(cellSelStart.rowIdx, cellSelEnd.rowIdx)
       const minC = Math.min(cellSelStart.colIdx, cellSelEnd.colIdx)
       const maxC = Math.max(cellSelStart.colIdx, cellSelEnd.colIdx)
       const rows: string[][] = []
       for (let r = minR; r <= maxR; r++) {
-        const bk = processedRef.current[r]
+        const bk = visualOrderRef.current[r]
         if (!bk) continue
         const row: string[] = []
         for (let c = minC; c <= maxC; c++) {
@@ -914,6 +920,7 @@ export default function BookingTable({
   // processedRef를 항상 최신 processed로 동기화
   useEffect(() => { processedRef.current = processed }, [processed])
 
+
   const monthGroups = useMemo(() => {
     if (!monthView) return null
     const map: Record<string, Booking[]> = {}
@@ -928,6 +935,15 @@ export default function BookingTable({
     })
     return keys.map(key => ({ key, rows: map[key] }))
   }, [processed, monthView])
+
+  // visualOrderRef: 화면에 실제 렌더되는 행 순서를 추적 (monthView 재정렬 대응)
+  useEffect(() => {
+    if (monthView && monthGroups) {
+      visualOrderRef.current = monthGroups.flatMap(g => g.rows)
+    } else {
+      visualOrderRef.current = processed
+    }
+  }, [processed, monthGroups, monthView])
 
   // ── 편집 모드 토글: OFF 시 일괄 저장 ──────────────────────────────
 
@@ -1068,7 +1084,7 @@ export default function BookingTable({
     const startCol = cellSelStart.colIdx
     const batchEdits: Record<string, Partial<Booking>> = {}
     for (let ri = 0; ri < pasteRows.length; ri++) {
-      const booking = processedRef.current[startRow + ri]
+      const booking = visualOrderRef.current[startRow + ri]
       if (!booking) continue
       if (booking.forwarder_handler_id !== currentUserId && !pasteRows[ri].some((_, ci) => colsToRender[startCol + ci] === 'forwarder_handler')) continue
       const changes: Partial<Booking> = {}
