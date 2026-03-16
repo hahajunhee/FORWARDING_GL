@@ -261,6 +261,37 @@ function exportToExcel(rows: Booking[], customColumns: ColumnDefinition[]) {
   })
 }
 
+function exportInlandTransport(rows: Booking[]) {
+  const headers = ['최종도착지', '선사', '부킹번호', '컨테이너', '부킹수량', '서류마감', '모선명', 'VOYAGE']
+  const csvRows = rows.map(b => {
+    const bookingNo = (b.booking_entries && b.booking_entries.length > 0)
+      ? b.booking_entries.map(e => e.no).join(' / ')
+      : (b.booking_no || '')
+    const containers = formatContainers(b)
+    const qty = calcTotalQty(b)
+    const qtyStr = qty > 0 ? (qty % 1 === 0 ? String(qty) : qty.toFixed(1)) : ''
+    return [
+      b.final_destination || '',
+      b.carrier || '',
+      bookingNo,
+      containers,
+      qtyStr,
+      b.doc_cutoff_date || '',
+      b.vessel_name || '',
+      b.voyage || '',
+    ]
+  })
+  const esc = (v: string) => (v.includes(',') || v.includes('"') || v.includes('\n')) ? `"${v.replace(/"/g, '""')}"` : v
+  const content = [headers, ...csvRows].map(row => row.map(esc).join(',')).join('\n')
+  const blob = new Blob(['\uFEFF' + content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `내륙운송_${format(new Date(), 'yyyyMMdd')}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ── 컨테이너 편집 ─────────────────────────────────────────────────
 
 type CtrKey = 'qty_20_normal' | 'qty_20_dg' | 'qty_20_reefer' | 'qty_40_normal' | 'qty_40_dg' | 'qty_40_reefer'
@@ -1576,6 +1607,13 @@ export default function BookingTable({
             <button onClick={handleToggleMonthView}
               className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${monthView ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
               월별
+            </button>
+            <button onClick={() => exportInlandTransport(processed)} disabled={processed.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              내륙운송
             </button>
             <button onClick={() => exportToExcel(processed, customColumns)} disabled={processed.length === 0}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
