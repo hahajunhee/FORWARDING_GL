@@ -718,6 +718,7 @@ export default function BookingTable({
   const isMouseSelecting = useRef(false)
   const processedRef = useRef<Booking[]>([])
   const visualOrderRef = useRef<Booking[]>([])
+  const allColDefsRef = useRef(allColDefs)
 
   // 마운트 시 localStorage에서 복원 (raw setter 사용 → 저장 루프 없음)
   useEffect(() => {
@@ -876,7 +877,7 @@ export default function BookingTable({
       const headerRow: string[] = []
       for (let c = minC; c <= maxC; c++) {
         const col = colsToRender[c]
-        if (col) headerRow.push(allColDefs[col]?.label || col)
+        if (col) headerRow.push(allColDefsRef.current[col]?.label || col)
       }
       const rows: string[][] = [headerRow]
       for (let r = minR; r <= maxR; r++) {
@@ -957,6 +958,7 @@ export default function BookingTable({
 
   // processedRef를 항상 최신 processed로 동기화
   useEffect(() => { processedRef.current = processed }, [processed])
+  useEffect(() => { allColDefsRef.current = allColDefs }, [allColDefs])
 
 
   const monthGroups = useMemo(() => {
