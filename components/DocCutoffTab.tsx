@@ -44,6 +44,7 @@ function getFieldValue(booking: Booking, key: string, customColumns: ColumnDefin
     case 'discharge_port': return booking.discharge_port || ''
     case 'carrier': return booking.carrier || ''
     case 'vessel_name': return booking.vessel_name || ''
+    case 'voyage': return booking.voyage || ''
     case 'secured_space': return booking.secured_space || ''
     case 'mqc': return booking.mqc || ''
     case 'customer_doc_handler': return booking.customer_doc_handler || ''
@@ -63,7 +64,7 @@ function getFieldValue(booking: Booking, key: string, customColumns: ColumnDefin
 }
 
 const BUILTIN_FIELD_KEYS = [
-  'booking_no', 'final_destination', 'discharge_port', 'carrier', 'vessel_name',
+  'booking_no', 'final_destination', 'discharge_port', 'carrier', 'vessel_name', 'voyage',
   'secured_space', 'mqc', 'customer_doc_handler', 'forwarder_handler',
   'doc_cutoff_date', 'proforma_etd', 'updated_etd', 'eta', 'containers', 'remarks',
 ]

@@ -873,13 +873,7 @@ export default function BookingTable({
       const maxR = Math.max(cellSelStart.rowIdx, cellSelEnd.rowIdx)
       const minC = Math.min(cellSelStart.colIdx, cellSelEnd.colIdx)
       const maxC = Math.max(cellSelStart.colIdx, cellSelEnd.colIdx)
-      // 열 제목 행
-      const headerRow: string[] = []
-      for (let c = minC; c <= maxC; c++) {
-        const col = colsToRender[c]
-        if (col) headerRow.push(allColDefsRef.current[col]?.label || col)
-      }
-      const rows: string[][] = [headerRow]
+      const rows: string[][] = []
       for (let r = minR; r <= maxR; r++) {
         const bk = visualOrderRef.current[r]
         if (!bk) continue
@@ -891,11 +885,10 @@ export default function BookingTable({
         rows.push(row)
       }
       const tsv = rows.map(r => r.join('\t')).join('\n')
-      const htmlHeaderCells = headerRow.map(v => `<th style="padding:2px 6px;background:#f3f4f6;font-weight:600;">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</th>`).join('')
-      const htmlDataRows = rows.slice(1).map(r =>
+      const htmlRows = rows.map(r =>
         '<tr>' + r.map(v => `<td style="padding:2px 6px;">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>`).join('') + '</tr>'
       ).join('')
-      const html = `<table style="font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10pt;border-collapse:collapse;"><thead><tr>${htmlHeaderCells}</tr></thead><tbody>${htmlDataRows}</tbody></table>`
+      const html = `<table style="font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10pt;border-collapse:collapse;">${htmlRows}</table>`
       e.preventDefault()
       try {
         navigator.clipboard.write([
