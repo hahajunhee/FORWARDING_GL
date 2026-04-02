@@ -371,7 +371,7 @@ function BookingEntriesEditor({ entries, onChange }: {
   )
 }
 
-// YYYYMMDD → YYYY-MM-DD 자동 변환
+// 날짜 입력 자동 변환: MMDD, MM/DD, YYYYMMDD → YYYY-MM-DD
 function normalizeDateInput(v: string): string | null {
   if (!v) return null
   const t = v.trim()
@@ -381,8 +381,13 @@ function normalizeDateInput(v: string): string | null {
     const year = new Date().getFullYear()
     return `${year}-${slashMatch[1].padStart(2, '0')}-${slashMatch[2].padStart(2, '0')}`
   }
-  // YYYYMMDD (8자리 숫자) → YYYY-MM-DD
   const digits = t.replace(/[^0-9]/g, '')
+  // MMDD (4자리 숫자) → 올해 YYYY-MM-DD
+  if (digits.length === 4) {
+    const year = new Date().getFullYear()
+    return `${year}-${digits.slice(0, 2)}-${digits.slice(2, 4)}`
+  }
+  // YYYYMMDD (8자리 숫자) → YYYY-MM-DD
   if (digits.length === 8) return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
   return t || null
 }
@@ -562,7 +567,7 @@ function ViewCell({ colKey, booking, currentUserId, customColumns }: {
       )
     }
     case 'proforma_etd':
-      return <span className="text-gray-500 text-xs">{fmtDate(booking.proforma_etd)}</span>
+      return <span className="text-gray-700 text-xs font-medium">{fmtDate(booking.proforma_etd)}</span>
     case 'updated_etd':
       return <span className={`text-xs ${getEtdClass(booking.updated_etd)}`}>{fmtDate(booking.updated_etd)}</span>
     case 'eta':
@@ -1167,19 +1172,20 @@ export default function BookingTable({
     const tempId = `new-${Date.now()}`
     setNewRows(prev => [{
       tempId,
-      booking_no: booking.booking_no ? `${booking.booking_no}_복사` : '',
+      booking_no: '',
       final_destination: booking.final_destination || '',
       discharge_port: booking.discharge_port || '',
       carrier: booking.carrier || '',
-      vessel_name: booking.vessel_name || '',
+      vessel_name: '',
+      voyage: '',
       secured_space: booking.secured_space || '',
       mqc: booking.mqc || '',
       customer_doc_handler: booking.customer_doc_handler || '',
       forwarder_handler_id: booking.forwarder_handler_id,
-      doc_cutoff_date: booking.doc_cutoff_date,
-      proforma_etd: booking.proforma_etd,
-      updated_etd: booking.updated_etd,
-      eta: booking.eta,
+      doc_cutoff_date: null,
+      proforma_etd: null,
+      updated_etd: null,
+      eta: null,
       qty_20_normal: booking.qty_20_normal || 0,
       qty_20_dg: booking.qty_20_dg || 0,
       qty_20_reefer: booking.qty_20_reefer || 0,
@@ -1188,7 +1194,9 @@ export default function BookingTable({
       qty_40_reefer: booking.qty_40_reefer || 0,
       remarks: booking.remarks || '',
       extra_data: { ...(booking.extra_data || {}) },
-      booking_entries: booking.booking_entries ? booking.booking_entries.map(e => ({ ...e })) : [],
+      booking_entries: booking.booking_entries
+        ? booking.booking_entries.map(e => ({ ...e, no: '' }))
+        : [{ no: '', ctr_type: '20', ctr_qty: 1 }],
     }, ...prev])
   }
 
@@ -1299,8 +1307,8 @@ export default function BookingTable({
 
     const isGroupStart = !prevBooking || !isSameGroup(booking, prevBooking)
     const isGroupEnd = !nextBooking || !isSameGroup(booking, nextBooking)
-    const groupBorder = '1.5px solid #9ca3af'
-    const colBorder = '1px solid #e5e7eb'
+    const groupBorder = '2px solid #6b7280'
+    const colBorder = '1px solid #d1d5db'
     const isSelected = selectedRows.has(booking.id)
     const manageOffset = editMode ? MANAGE_COL_W : 0
 
@@ -1353,9 +1361,14 @@ export default function BookingTable({
           backgroundColor: isSelected ? '#eff6ff' : (handlerColor || undefined),
           ...(editMode && hasEdits ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
         }}>
-        <td className="table-td w-9 sticky left-0 z-10 bg-white"
-          style={{ backgroundColor: isSelected ? '#eff6ff' : (handlerColor || 'white') }}>
-          <input type="checkbox" checked={isSelected} onChange={() => toggleRowSelect(booking.id)} className="rounded" />
+        <td className="table-td w-9 sticky left-0 z-10"
+          style={{
+            backgroundColor: isSelected ? '#eff6ff' : (handlerColor || 'white'),
+            borderRight: colBorder,
+            borderTop: isGroupStart ? groupBorder : colBorder,
+            borderBottom: isGroupEnd ? groupBorder : 'none',
+          }}>
+          <input type="checkbox" checked={isSelected} onChange={() => toggleRowSelect(booking.id)} className="rounded border-gray-400" />
         </td>
         {editMode && manageCell}
         {colsToRender.map(col => {
@@ -1428,7 +1441,7 @@ export default function BookingTable({
 
   function renderNewRow(row: NewRow) {
     const err = rowErrors[row.tempId]
-    const newRowBorder = { border: '1px solid #e5e7eb' }
+    const newRowBorder = { border: '1px solid #d1d5db' }
     return (
       <tr key={row.tempId} className="bg-violet-50/60">
         <td className="table-td w-9 sticky left-0 z-10" style={{ backgroundColor: '#f5f3ff' }} />
@@ -1713,22 +1726,22 @@ export default function BookingTable({
       )}
 
       {/* 테이블 */}
-      <div className="flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-200"
+      <div className="flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-300 shadow-sm"
         onMouseUp={() => { isMouseSelecting.current = false }}
         onMouseLeave={() => { isMouseSelecting.current = false }}
         onPaste={handleTablePaste}>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-20">
-              <tr className="bg-gray-50">
-                <th className="table-th w-9 bg-gray-50 sticky left-0 z-30">
+              <tr style={{ background: 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}>
+                <th className="table-th w-9 sticky left-0 z-30" style={{ background: 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}>
                   <input type="checkbox" checked={allSelected} onChange={() => {
                     if (allSelected) setSelectedRows(new Set())
                     else setSelectedRows(new Set(allProcessedIds))
                   }} className="rounded" />
                 </th>
                 {editMode && (
-                  <th className="table-th bg-gray-50 sticky z-30 text-xs min-w-0"
-                    style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W }}>관리</th>
+                  <th className="table-th sticky z-30 text-xs min-w-0"
+                    style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, background: 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}>관리</th>
                 )}
                 {colsToRender.map(col => {
                   const def = allColDefs[col]
@@ -1739,12 +1752,12 @@ export default function BookingTable({
                     <th key={col}
                       title={def.description || undefined}
                       className={`table-th select-none transition-colors relative
-                        ${isPinned ? 'sticky z-30 bg-gray-50' : 'bg-gray-50 cursor-grab active:cursor-grabbing'}
+                        ${isPinned ? 'sticky z-30' : 'cursor-grab active:cursor-grabbing'}
                         ${dragSrc === col ? 'opacity-40' : ''}
                         ${dragOver === col && dragSrc !== col ? 'bg-blue-100 text-blue-700' : ''}
                         ${def.description ? 'cursor-help' : ''}
                       `}
-                      style={{ minWidth: colWidths[col] || def.minW, width: colWidths[col] || undefined, ...(fixedLeft !== null ? { left: fixedLeft } : {}) }}
+                      style={{ minWidth: colWidths[col] || def.minW, width: colWidths[col] || undefined, ...(fixedLeft !== null ? { left: fixedLeft } : {}), background: dragOver === col && dragSrc !== col ? undefined : 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}
                       draggable={!isPinned}
                       onDragStart={e => {
                         if (isPinned) return
@@ -1778,7 +1791,7 @@ export default function BookingTable({
                     </th>
                   )
                 })}
-                {!editMode && <th className="table-th min-w-[90px] bg-gray-50">관리</th>}
+                {!editMode && <th className="table-th min-w-[90px]" style={{ background: 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}>관리</th>}
               </tr>
             </thead>
             <tbody>

@@ -34,11 +34,15 @@
   }
 
   .table-th {
-    @apply px-3 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap bg-gray-50 border-x border-gray-200 border-b-2 border-b-gray-300;
+    @apply px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wide whitespace-nowrap border-b-2 border-b-gray-400;
+    background: linear-gradient(to bottom, #f8fafc, #eef2f7);
+    border-left: 1px solid #d1d5db;
+    border-right: 1px solid #d1d5db;
   }
 
   .table-td {
-    @apply px-3 py-2.5 text-sm text-gray-700 whitespace-nowrap;
+    @apply px-3 py-2 text-sm text-gray-800 whitespace-nowrap;
+    border-bottom: 1px solid #d1d5db;
   }
 }
 
@@ -59,4 +63,14 @@
 
 .date-past {
   @apply text-gray-400;
+}
+
+/* 테이블 행 호버 효과 */
+table tbody tr:hover td {
+  background-color: #f0f7ff !important;
+}
+
+/* 테이블 짝수 행 배경 (머지되지 않은 경우) */
+table tbody tr:nth-child(even) {
+  --row-bg: #fafbfc;
 }
