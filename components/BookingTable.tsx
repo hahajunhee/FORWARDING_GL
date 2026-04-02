@@ -4,8 +4,8 @@ import { useState, useMemo, useTransition, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { differenceInCalendarDays, parseISO, isValid, format } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import type { Booking, Profile, CustomList, ColumnDefinition, BookingEntry } from '@/types'
-import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, CARRIERS, MAJOR_PORTS, DEFAULT_DESTINATIONS } from '@/types'
+import type { Booking, Profile, CustomList, ColumnDefinition, BookingEntry, TableStyle } from '@/types'
+import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, CARRIERS, MAJOR_PORTS, DEFAULT_DESTINATIONS, DEFAULT_TABLE_STYLE } from '@/types'
 import { deleteBooking, saveColumnOrder, bulkSaveBookings, bulkDeleteBookings } from '@/app/bookings/actions'
 
 // 병합 대상 열 (계층 순서: 최종도착지 → 양하항 → 선사)
@@ -640,6 +640,7 @@ interface Props {
   baseColDescriptions?: Record<string, string>
   baseColLabels?: Record<string, string>
   destinationSortOrder?: string[]
+  tableStyle?: TableStyle
   onSettingsClick?: () => void
 }
 
@@ -652,6 +653,7 @@ export default function BookingTable({
   baseColDescriptions = {},
   baseColLabels = {},
   destinationSortOrder = [],
+  tableStyle = DEFAULT_TABLE_STYLE,
   onSettingsClick,
 }: Props) {
   const router = useRouter()
@@ -721,6 +723,7 @@ export default function BookingTable({
   const [cellSelStart, setCellSelStart] = useState<{ rowIdx: number; colIdx: number } | null>(null)
   const [cellSelEnd, setCellSelEnd] = useState<{ rowIdx: number; colIdx: number } | null>(null)
   const isMouseSelecting = useRef(false)
+  const [isDragSelecting, setIsDragSelecting] = useState(false)
   const processedRef = useRef<Booking[]>([])
   const visualOrderRef = useRef<Booking[]>([])
   const allColDefsRef = useRef(allColDefs)
@@ -918,7 +921,7 @@ export default function BookingTable({
       if (handlerFilter && b.forwarder_handler_id !== handlerFilter) return false
       if (regionFilter && b.forwarder_handler?.region !== regionFilter) return false
       if (customersFilter && !b.forwarder_handler?.customers?.includes(customersFilter)) return false
-      const etd = b.updated_etd || b.proforma_etd
+      const etd = b.proforma_etd
       if (etdFrom && etd && etd < etdFrom) return false
       if (etdTo && etd && etd > etdTo) return false
       if (docFilter) {
@@ -963,7 +966,7 @@ export default function BookingTable({
     if (!monthView) return null
     const map: Record<string, Booking[]> = {}
     for (const b of processed) {
-      const k = getMonthKey(b.updated_etd || b.proforma_etd)
+      const k = getMonthKey(b.proforma_etd)
       if (!map[k]) map[k] = []
       map[k].push(b)
     }
@@ -1307,8 +1310,8 @@ export default function BookingTable({
 
     const isGroupStart = !prevBooking || !isSameGroup(booking, prevBooking)
     const isGroupEnd = !nextBooking || !isSameGroup(booking, nextBooking)
-    const groupBorder = '2px solid #6b7280'
-    const colBorder = '1px solid #d1d5db'
+    const groupBorder = `${tableStyle.groupBorderWidth}px solid ${tableStyle.groupBorderColor}`
+    const colBorder = `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`
     const isSelected = selectedRows.has(booking.id)
     const manageOffset = editMode ? MANAGE_COL_W : 0
 
@@ -1398,6 +1401,7 @@ export default function BookingTable({
               onMouseDown={e => {
                 if (e.button !== 0) return
                 isMouseSelecting.current = true
+                setIsDragSelecting(true)
                 setCellSelStart({ rowIdx, colIdx })
                 setCellSelEnd({ rowIdx, colIdx })
               }}
@@ -1726,9 +1730,10 @@ export default function BookingTable({
       )}
 
       {/* 테이블 */}
-      <div className="flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-300 shadow-sm"
-        onMouseUp={() => { isMouseSelecting.current = false }}
-        onMouseLeave={() => { isMouseSelecting.current = false }}
+      <div className={`flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-300 shadow-sm${isDragSelecting ? ' is-drag-selecting' : ''}`}
+        onMouseUp={() => { isMouseSelecting.current = false; setIsDragSelecting(false) }}
+        onMouseLeave={() => { isMouseSelecting.current = false; setIsDragSelecting(false) }}
+        onDoubleClick={() => { if (!editMode) handleToggleEditMode() }}
         onPaste={handleTablePaste}>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-20">

@@ -6,10 +6,10 @@ import {
   addCustomListItem, deleteCustomListItem, updateCustomListItem,
   saveColumnSettings, addColumnDefinition, removeColumnDefinition,
   saveCustomListOrder, saveMyProfile, updateColumnDescription, saveBaseColDescriptions,
-  saveBaseColLabels, saveDestinationSortOrder, updateCustomListColor,
+  saveBaseColLabels, saveDestinationSortOrder, updateCustomListColor, saveTableStyle,
 } from './actions'
-import type { CustomList, ColumnDefinition } from '@/types'
-import { DEFAULT_DESTINATIONS, MAJOR_PORTS, CARRIERS, DEFAULT_COLUMN_ORDER, COLUMN_LABELS } from '@/types'
+import type { CustomList, ColumnDefinition, TableStyle } from '@/types'
+import { DEFAULT_DESTINATIONS, MAJOR_PORTS, CARRIERS, DEFAULT_COLUMN_ORDER, COLUMN_LABELS, DEFAULT_TABLE_STYLE } from '@/types'
 
 type ListTab = 'destination' | 'port' | 'carrier'
 type MainTab = 'lists' | 'columns' | 'myinfo'
@@ -609,12 +609,14 @@ interface SettingsClientProps {
   baseColDescriptions: Record<string, string>
   baseColLabels: Record<string, string>
   destinationSortOrder: string[]
+  currentTableStyle: TableStyle
 }
 
 export default function SettingsClient({
   customLists, columnOrder, pinnedColumns, columnDefinitions,
   currentName, currentRegion, currentCustomers,
   regionList, customerList, baseColDescriptions, baseColLabels, destinationSortOrder,
+  currentTableStyle,
 }: SettingsClientProps) {
   const [mainTab, setMainTab] = useState<MainTab>('lists')
 
@@ -626,6 +628,19 @@ export default function SettingsClient({
   const [profileError, setProfileError] = useState<string | null>(null)
   const [, startProfileTransition] = useTransition()
 
+  // 테이블 스타일
+  const [tableStyle, setTableStyle] = useState<TableStyle>(currentTableStyle)
+  const [styleSaving, setStyleSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [, startStyleTransition] = useTransition()
+
+  const handleSaveTableStyle = () => {
+    setStyleSaving('saving')
+    startStyleTransition(async () => {
+      const result = await saveTableStyle(tableStyle)
+      if (result.error) setStyleSaving('error')
+      else { setStyleSaving('saved'); setTimeout(() => setStyleSaving('idle'), 2500) }
+    })
+  }
 
   const handleSaveProfile = () => {
     setProfileError(null)
@@ -810,6 +825,102 @@ export default function SettingsClient({
               </button>
               {profileSaving === 'saved' && <span className="text-sm text-green-600 font-medium">✓ 저장됨</span>}
               {profileSaving === 'error' && <span className="text-sm text-red-600">{profileError || '저장 실패'}</span>}
+            </div>
+
+            {/* 테이블 스타일 */}
+            <div className="border-t border-gray-100 pt-5 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">테이블 테두리 스타일</h3>
+                <p className="text-xs text-gray-500 mt-1">부킹장 테이블의 테두리 색상과 두께를 개인별로 설정합니다.</p>
+              </div>
+
+              {/* 미리보기 */}
+              <div className="rounded-lg overflow-hidden" style={{ border: `${tableStyle.groupBorderWidth}px solid ${tableStyle.groupBorderColor}` }}>
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr style={{ background: 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}>
+                      {['선사', '모선명', '서류마감', 'ETD'].map(h => (
+                        <th key={h} className="px-3 py-2 text-left font-bold text-gray-700"
+                          style={{ borderBottom: `2px solid ${tableStyle.groupBorderColor}`, borderRight: `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}` }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[['MSC', 'MAERSK SEOUL', '05/20', '05/18'], ['HMM', 'HYUNDAI BRAVE', '05/27', '05/25']].map((row, i) => (
+                      <tr key={i}>
+                        {row.map((cell, j) => (
+                          <td key={j} className="px-3 py-1.5 text-gray-800"
+                            style={{ borderBottom: `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`, borderRight: `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}` }}>
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">셀 테두리 색상</label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={tableStyle.cellBorderColor}
+                      onChange={e => setTableStyle(s => ({ ...s, cellBorderColor: e.target.value }))}
+                      className="w-10 h-8 rounded border border-gray-200 cursor-pointer p-0.5" />
+                    <input type="text" value={tableStyle.cellBorderColor}
+                      onChange={e => setTableStyle(s => ({ ...s, cellBorderColor: e.target.value }))}
+                      className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">셀 테두리 두께</label>
+                  <div className="flex gap-1">
+                    {[{ v: 1, label: '얇게' }, { v: 2, label: '보통' }, { v: 3, label: '굵게' }].map(({ v, label }) => (
+                      <button key={v} onClick={() => setTableStyle(s => ({ ...s, cellBorderWidth: v }))}
+                        className={`flex-1 py-1.5 text-xs rounded border transition-colors font-medium ${tableStyle.cellBorderWidth === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">그룹 구분선 색상</label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={tableStyle.groupBorderColor}
+                      onChange={e => setTableStyle(s => ({ ...s, groupBorderColor: e.target.value }))}
+                      className="w-10 h-8 rounded border border-gray-200 cursor-pointer p-0.5" />
+                    <input type="text" value={tableStyle.groupBorderColor}
+                      onChange={e => setTableStyle(s => ({ ...s, groupBorderColor: e.target.value }))}
+                      className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1.5">그룹 구분선 두께</label>
+                  <div className="flex gap-1">
+                    {[{ v: 1, label: '얇게' }, { v: 2, label: '보통' }, { v: 3, label: '굵게' }].map(({ v, label }) => (
+                      <button key={v} onClick={() => setTableStyle(s => ({ ...s, groupBorderWidth: v }))}
+                        className={`flex-1 py-1.5 text-xs rounded border transition-colors font-medium ${tableStyle.groupBorderWidth === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button onClick={handleSaveTableStyle} disabled={styleSaving === 'saving'}
+                  className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors font-medium">
+                  {styleSaving === 'saving' ? '저장 중...' : '테두리 스타일 저장'}
+                </button>
+                <button onClick={() => setTableStyle(DEFAULT_TABLE_STYLE)}
+                  className="px-3 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 transition-colors">
+                  기본값
+                </button>
+                {styleSaving === 'saved' && <span className="text-sm text-green-600 font-medium">✓ 저장됨</span>}
+                {styleSaving === 'error' && <span className="text-sm text-red-600">저장 실패</span>}
+              </div>
             </div>
 
           </div>

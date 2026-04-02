@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import SettingsClient from './SettingsClient'
 import type { CustomList, Profile, ColumnDefinition } from '@/types'
-import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS } from '@/types'
+import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE } from '@/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +47,7 @@ export default async function SettingsPage() {
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}
       baseColLabels={(baseColLabelsSetting?.value as Record<string, string> | null) || {}}
       destinationSortOrder={(destSortSetting?.value as string[] | null) || []}
+      currentTableStyle={profile?.table_style || DEFAULT_TABLE_STYLE}
     />
   )
 }

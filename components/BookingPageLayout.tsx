@@ -7,7 +7,7 @@ import DocCutoffTab from './DocCutoffTab'
 import ScheduleTab from './ScheduleTab'
 import { signOut } from '@/app/bookings/actions'
 import type { Booking, Profile, CustomList, ColumnDefinition } from '@/types'
-import { DEFAULT_PINNED_COLUMNS } from '@/types'
+import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE } from '@/types'
 
 type Tab = 'bookings' | 'doc_cutoff' | 'schedule'
 
@@ -192,6 +192,7 @@ export default function BookingPageLayout({
                 baseColDescriptions={baseColDescriptions}
                 baseColLabels={baseColLabels}
                 destinationSortOrder={destinationSortOrder}
+                tableStyle={currentProfile?.table_style || DEFAULT_TABLE_STYLE}
               />
             </div>
           )}

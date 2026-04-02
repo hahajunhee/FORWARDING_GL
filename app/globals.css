@@ -65,12 +65,12 @@
   @apply text-gray-400;
 }
 
-/* 테이블 행 호버 효과 */
+/* 테이블 행 호버 효과 — 드래그 선택 중엔 비활성화 */
 table tbody tr:hover td {
-  background-color: #f0f7ff !important;
+  background-color: #f0f7ff;
 }
 
-/* 테이블 짝수 행 배경 (머지되지 않은 경우) */
-table tbody tr:nth-child(even) {
-  --row-bg: #fafbfc;
+/* 드래그 범위 선택 중에는 hover 끄기 */
+.is-drag-selecting table tbody tr:hover td {
+  background-color: inherit !important;
 }

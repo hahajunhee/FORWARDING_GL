@@ -13,6 +13,20 @@ export interface ColumnDefinition {
   created_at: string
 }
 
+export interface TableStyle {
+  cellBorderColor: string
+  cellBorderWidth: number
+  groupBorderColor: string
+  groupBorderWidth: number
+}
+
+export const DEFAULT_TABLE_STYLE: TableStyle = {
+  cellBorderColor: '#d1d5db',
+  cellBorderWidth: 1,
+  groupBorderColor: '#6b7280',
+  groupBorderWidth: 2,
+}
+
 export interface Profile {
   id: string
   email: string
@@ -24,6 +38,7 @@ export interface Profile {
   region: string | null
   customers: string | null
   is_active: boolean | null
+  table_style: TableStyle | null
   created_at: string
 }
 

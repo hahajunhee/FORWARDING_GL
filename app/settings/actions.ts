@@ -312,6 +312,26 @@ export async function saveMyColor(color: string): Promise<{ error: string | null
   return { error: null }
 }
 
+// ── 테이블 스타일 저장 (유저별) ──────────────────────────────────
+
+export async function saveTableStyle(
+  style: { cellBorderColor: string; cellBorderWidth: number; groupBorderColor: string; groupBorderWidth: number }
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('profiles')
+    .update({ table_style: style })
+    .eq('id', user.id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  revalidatePath('/settings')
+  return { error: null }
+}
+
 // ── 서류마감 메일 템플릿 저장 (유저별) ─────────────────────────────
 
 export async function saveDocTemplate(
