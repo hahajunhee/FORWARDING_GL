@@ -631,14 +631,22 @@ export default function SettingsClient({
   // 테이블 스타일
   const [tableStyle, setTableStyle] = useState<TableStyle>(currentTableStyle)
   const [styleSaving, setStyleSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [styleError, setStyleError] = useState<string | null>(null)
   const [, startStyleTransition] = useTransition()
 
   const handleSaveTableStyle = () => {
     setStyleSaving('saving')
+    setStyleError(null)
     startStyleTransition(async () => {
       const result = await saveTableStyle(tableStyle)
-      if (result.error) setStyleSaving('error')
-      else { setStyleSaving('saved'); setTimeout(() => setStyleSaving('idle'), 2500) }
+      if (result.error) {
+        setStyleSaving('error')
+        setStyleError(result.error)
+        setTimeout(() => setStyleSaving('idle'), 4000)
+      } else {
+        setStyleSaving('saved')
+        setTimeout(() => setStyleSaving('idle'), 2500)
+      }
     })
   }
 
@@ -919,7 +927,15 @@ export default function SettingsClient({
                   기본값
                 </button>
                 {styleSaving === 'saved' && <span className="text-sm text-green-600 font-medium">✓ 저장됨</span>}
-                {styleSaving === 'error' && <span className="text-sm text-red-600">저장 실패</span>}
+                {styleSaving === 'error' && (
+                  <div className="flex-1">
+                    <p className="text-sm text-red-600 font-medium">저장 실패 — Supabase에서 아래 SQL을 실행해주세요:</p>
+                    <code className="block mt-1 text-xs bg-gray-100 rounded px-2 py-1 font-mono text-gray-700 select-all">
+                      ALTER TABLE profiles ADD COLUMN IF NOT EXISTS table_style JSONB DEFAULT NULL;
+                    </code>
+                    {styleError && <p className="text-xs text-red-500 mt-0.5">{styleError}</p>}
+                  </div>
+                )}
               </div>
             </div>
 

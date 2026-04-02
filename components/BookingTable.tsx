@@ -865,6 +865,18 @@ export default function BookingTable({
     return [...validPinned, ...movable]
   }, [colOrder, pinnedColumns, allColDefs])
 
+  // Ctrl+S: 편집 모드 저장/종료
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== 's') return
+      e.preventDefault()
+      if (editMode && !bulkSaving) handleToggleEditMode()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode, bulkSaving])
+
   // Ctrl+C: 선택 범위 클립보드 복사 (colsToRender, processed 이후에 위치해야 함)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

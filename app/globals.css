@@ -65,12 +65,12 @@
   @apply text-gray-400;
 }
 
-/* 테이블 행 호버 효과 — 드래그 선택 중엔 비활성화 */
+/* 테이블 행 호버 효과 */
 table tbody tr:hover td {
   background-color: #f0f7ff;
 }
 
-/* 드래그 범위 선택 중에는 hover 끄기 */
+/* 드래그 범위 선택 중: hover 억제 (단, 선택된 셀의 inline style은 그대로 유지) */
 .is-drag-selecting table tbody tr:hover td {
-  background-color: inherit !important;
+  background-color: unset;
 }
