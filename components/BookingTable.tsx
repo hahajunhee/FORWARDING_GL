@@ -795,6 +795,8 @@ export default function BookingTable({
   }
 
   // 셀 텍스트 값 (복사용)
+  const getCellTextValueRef = useRef<(booking: Booking, col: string) => string>(() => '')
+
   function getCellTextValue(booking: Booking, col: string): string {
     switch (col) {
       case 'booking_no':
@@ -827,6 +829,7 @@ export default function BookingTable({
       }
     }
   }
+  getCellTextValueRef.current = getCellTextValue
 
   function isCellInRange(rowIdx: number, colIdx: number): boolean {
     if (!cellSelStart || !cellSelEnd) return false
@@ -892,17 +895,21 @@ export default function BookingTable({
     return () => window.removeEventListener('keydown', handler, { capture: true })
   }, []) // stable — refs만 사용
 
-  // Ctrl+C: copy 이벤트 방식 (clipboardData.setData — 모든 브라우저 지원)
+
+  // Ctrl+C: keydown 방식, refs 기반 (stale closure 없음)
   useEffect(() => {
-    const handler = (e: ClipboardEvent) => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'c') return
       const start = cellSelStartRef.current
       const end = cellSelEndRef.current
       if (!start || !end) return
+      // INPUT 안에 텍스트 선택 중이면 브라우저 기본 복사 허용
       const active = document.activeElement
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
         const inputEl = active as HTMLInputElement
         if (inputEl.selectionStart !== null && inputEl.selectionStart !== inputEl.selectionEnd) return
       }
+      e.preventDefault()
       const cols = colsToRenderRef.current
       const minR = Math.min(start.rowIdx, end.rowIdx)
       const maxR = Math.max(start.rowIdx, end.rowIdx)
@@ -915,7 +922,7 @@ export default function BookingTable({
         const row: string[] = []
         for (let c = minC; c <= maxC; c++) {
           const col = cols[c]
-          if (col) row.push(getCellTextValue(bk, col))
+          if (col) row.push(getCellTextValueRef.current(bk, col))
         }
         rows.push(row)
       }
@@ -925,12 +932,20 @@ export default function BookingTable({
         '<tr>' + r.map(v => `<td style="padding:2px 6px;">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>`).join('') + '</tr>'
       ).join('')
       const html = `<table style="font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10pt;border-collapse:collapse;">${htmlRows}</table>`
-      e.preventDefault()
-      e.clipboardData?.setData('text/plain', tsv)
-      e.clipboardData?.setData('text/html', html)
+      // ClipboardItem 지원 브라우저: text + html 동시 복사
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        navigator.clipboard.write([
+          new ClipboardItem({
+            'text/plain': new Blob([tsv], { type: 'text/plain' }),
+            'text/html': new Blob([html], { type: 'text/html' }),
+          })
+        ]).catch(() => navigator.clipboard.writeText(tsv).catch(() => {}))
+      } else {
+        navigator.clipboard.writeText(tsv).catch(() => {})
+      }
     }
-    document.addEventListener('copy', handler)
-    return () => document.removeEventListener('copy', handler)
+    window.addEventListener('keydown', handler, { capture: true })
+    return () => window.removeEventListener('keydown', handler, { capture: true })
   }, []) // stable — refs만 사용
 
   const processed = useMemo(() => {
