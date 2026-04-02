@@ -722,11 +722,19 @@ export default function BookingTable({
   // ── 엑셀식 셀 범위 선택 ──────────────────────────────────────────
   const [cellSelStart, setCellSelStart] = useState<{ rowIdx: number; colIdx: number } | null>(null)
   const [cellSelEnd, setCellSelEnd] = useState<{ rowIdx: number; colIdx: number } | null>(null)
+  const cellSelStartRef = useRef(cellSelStart)
+  const cellSelEndRef = useRef(cellSelEnd)
+  cellSelStartRef.current = cellSelStart
+  cellSelEndRef.current = cellSelEnd
   const isMouseSelecting = useRef(false)
   const [isDragSelecting, setIsDragSelecting] = useState(false)
   const processedRef = useRef<Booking[]>([])
   const visualOrderRef = useRef<Booking[]>([])
   const allColDefsRef = useRef(allColDefs)
+  const editModeRef = useRef(editMode)
+  editModeRef.current = editMode
+  const bulkSavingRef = useRef(bulkSaving)
+  bulkSavingRef.current = bulkSaving
 
   // 마운트 시 localStorage에서 복원 (raw setter 사용 → 저장 루프 없음)
   useEffect(() => {
@@ -865,66 +873,65 @@ export default function BookingTable({
     return [...validPinned, ...movable]
   }, [colOrder, pinnedColumns, allColDefs])
 
-  // Ctrl+S: 편집 모드 저장/종료
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key !== 's') return
-      e.preventDefault()
-      if (editMode && !bulkSaving) handleToggleEditMode()
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode, bulkSaving])
+  // colsToRender ref (copy 핸들러에서 사용)
+  const colsToRenderRef = useRef(colsToRender)
+  colsToRenderRef.current = colsToRender
 
-  // Ctrl+C: 선택 범위 클립보드 복사 (colsToRender, processed 이후에 위치해야 함)
+  // Ctrl+S: 편집 모드 저장/종료 (capture 단계에서 브라우저 기본 동작 차단)
+  // handleToggleEditMode ref
+  const handleToggleEditModeRef = useRef<() => void>(() => {})
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key !== 'c') return
-      if (!cellSelStart || !cellSelEnd) return
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return
+      e.preventDefault()
+      e.stopPropagation()
+      if (editModeRef.current && !bulkSavingRef.current) handleToggleEditModeRef.current()
+    }
+    window.addEventListener('keydown', handler, { capture: true })
+    return () => window.removeEventListener('keydown', handler, { capture: true })
+  }, []) // stable — refs만 사용
+
+  // Ctrl+C: copy 이벤트 방식 (clipboardData.setData — 모든 브라우저 지원)
+  useEffect(() => {
+    const handler = (e: ClipboardEvent) => {
+      const start = cellSelStartRef.current
+      const end = cellSelEndRef.current
+      if (!start || !end) return
       const active = document.activeElement
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
-        // INPUT 안에 텍스트가 선택돼 있으면 브라우저 기본 복사 허용
         const inputEl = active as HTMLInputElement
         if (inputEl.selectionStart !== null && inputEl.selectionStart !== inputEl.selectionEnd) return
-        // 선택된 텍스트 없으면 셀 범위 복사로 진행
       }
-      const minR = Math.min(cellSelStart.rowIdx, cellSelEnd.rowIdx)
-      const maxR = Math.max(cellSelStart.rowIdx, cellSelEnd.rowIdx)
-      const minC = Math.min(cellSelStart.colIdx, cellSelEnd.colIdx)
-      const maxC = Math.max(cellSelStart.colIdx, cellSelEnd.colIdx)
+      const cols = colsToRenderRef.current
+      const minR = Math.min(start.rowIdx, end.rowIdx)
+      const maxR = Math.max(start.rowIdx, end.rowIdx)
+      const minC = Math.min(start.colIdx, end.colIdx)
+      const maxC = Math.max(start.colIdx, end.colIdx)
       const rows: string[][] = []
       for (let r = minR; r <= maxR; r++) {
         const bk = visualOrderRef.current[r]
         if (!bk) continue
         const row: string[] = []
         for (let c = minC; c <= maxC; c++) {
-          const col = colsToRender[c]
+          const col = cols[c]
           if (col) row.push(getCellTextValue(bk, col))
         }
         rows.push(row)
       }
+      if (rows.length === 0) return
       const tsv = rows.map(r => r.join('\t')).join('\n')
       const htmlRows = rows.map(r =>
         '<tr>' + r.map(v => `<td style="padding:2px 6px;">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>`).join('') + '</tr>'
       ).join('')
       const html = `<table style="font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10pt;border-collapse:collapse;">${htmlRows}</table>`
       e.preventDefault()
-      try {
-        navigator.clipboard.write([
-          new ClipboardItem({
-            'text/plain': new Blob([tsv], { type: 'text/plain' }),
-            'text/html': new Blob([html], { type: 'text/html' }),
-          })
-        ])
-      } catch {
-        navigator.clipboard.writeText(tsv)
-      }
+      e.clipboardData?.setData('text/plain', tsv)
+      e.clipboardData?.setData('text/html', html)
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cellSelStart, cellSelEnd, colsToRender])
+    document.addEventListener('copy', handler)
+    return () => document.removeEventListener('copy', handler)
+  }, []) // stable — refs만 사용
 
   const processed = useMemo(() => {
     let result = bookings.filter(b => {
@@ -1051,11 +1058,13 @@ export default function BookingTable({
     }
   }
 
+  handleToggleEditModeRef.current = handleToggleEditMode
+
   const handleToggleMonthView = () => {
     if (!monthView) {
       const currentMonth = format(new Date(), 'yyyy-MM')
       const toCollapse = new Set(
-        processed.map(b => getMonthKey(b.updated_etd || b.proforma_etd))
+        processed.map(b => getMonthKey(b.proforma_etd))
           .filter(k => k !== 'none' && k < currentMonth)
       )
       setCollapsedMonths(toCollapse)
