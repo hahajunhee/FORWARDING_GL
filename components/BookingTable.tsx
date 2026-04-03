@@ -84,18 +84,15 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
 }
 
 // pinnedColumns 기준으로 sticky left 오프셋 계산 (colWidths 반영)
-const MANAGE_COL_W = 90 // 관리 열 너비 (edit mode 시 왼쪽 고정)
-
 function getFixedLeft(
   col: string,
   pinnedCols: string[],
   colDefs: Record<string, { label: string; minW: number }>,
   colWidths: Record<string, number>,
-  manageColOffset: number = 0,
 ): number | null {
   const idx = pinnedCols.indexOf(col)
   if (idx === -1) return null
-  let left = 36 + manageColOffset // checkbox + 관리 열(editMode 시)
+  let left = 36 // checkbox 열 너비
   for (let i = 0; i < idx; i++) {
     const k = pinnedCols[i]
     left += colWidths[k] || colDefs[k]?.minW || 100
@@ -1564,12 +1561,10 @@ export default function BookingTable({
     const groupBorder = `${tableStyle.groupBorderWidth}px solid ${tableStyle.groupBorderColor}`
     const colBorder = `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`
     const isSelected = selectedRows.has(booking.id)
-    const manageOffset = editMode ? MANAGE_COL_W : 0
-
     const manageCell = (
-      <td className={`table-td ${editMode ? 'sticky z-10' : ''}`}
+      <td className="table-td"
         style={{
-          ...(editMode ? { left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: isSelected ? '#eff6ff' : (handlerColor || 'white') } : {}),
+          minWidth: 90,
           borderTop: isGroupStart ? groupBorder : colBorder,
           borderBottom: isGroupEnd ? groupBorder : 'none',
           borderLeft: colBorder,
@@ -1624,7 +1619,6 @@ export default function BookingTable({
           }}>
           <input type="checkbox" checked={isSelected} onChange={() => toggleRowSelect(booking.id)} className="rounded border-gray-400" />
         </td>
-        {editMode && manageCell}
         {colsToRender.map(col => {
           const def = allColDefs[col]
           if (!def) return null
@@ -1636,7 +1630,7 @@ export default function BookingTable({
           const rowSpan = spanInfo.span > 1 ? spanInfo.span : undefined
           const isMergedSpan = spanInfo.span > 1
           const isPinned = pinnedColumns.includes(col)
-          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, manageOffset)
+          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
           const isDocCol = col === 'doc_cutoff_date'
 
           const tdIsGroupStart = isMergedSpan ? true : isGroupStart
@@ -1689,7 +1683,7 @@ export default function BookingTable({
             </td>
           )
         })}
-        {!editMode && manageCell}
+        {manageCell}
       </tr>
     )
   }
@@ -1700,16 +1694,11 @@ export default function BookingTable({
     return (
       <tr key={row.tempId} className="bg-violet-50/60">
         <td className="table-td w-9 sticky left-0 z-10" style={{ backgroundColor: '#f5f3ff' }} />
-        <td className="table-td sticky z-10" style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: '#f5f3ff', ...newRowBorder }}>
-          {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
-          <button onClick={() => { setNewRows(prev => prev.filter(r => r.tempId !== row.tempId)); setRowErrors(p => { const c = { ...p }; delete c[row.tempId]; return c }) }}
-            className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">제거</button>
-        </td>
         {colsToRender.map(col => {
           const def = allColDefs[col]
           if (!def) return null
           const isPinned = pinnedColumns.includes(col)
-          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, MANAGE_COL_W)
+          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
           return (
             <td key={col} className={`table-td text-xs ${isPinned ? 'sticky z-10' : ''}`}
               style={{ minWidth: def.minW, ...(fixedLeft !== null ? { left: fixedLeft } : {}), ...(isPinned ? { backgroundColor: '#f5f3ff' } : {}), ...newRowBorder }}>
@@ -1719,6 +1708,11 @@ export default function BookingTable({
             </td>
           )
         })}
+        <td className="table-td" style={{ minWidth: 90, backgroundColor: '#f5f3ff', ...newRowBorder }}>
+          {err && <p className="text-xs text-red-500 mb-1">{err}</p>}
+          <button onClick={() => { setNewRows(prev => prev.filter(r => r.tempId !== row.tempId)); setRowErrors(p => { const c = { ...p }; delete c[row.tempId]; return c }) }}
+            className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">제거</button>
+        </td>
       </tr>
     )
   }
@@ -1726,7 +1720,6 @@ export default function BookingTable({
   function renderBlankSailingRow(row: BlankSailingRow, rowIdx: number, rowSpans: Record<string, SpanInfo>, prevRow?: DisplayRow | null, nextRow?: DisplayRow | null) {
     const colBorder = `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`
     const groupBorder = `${tableStyle.groupBorderWidth}px solid ${tableStyle.groupBorderColor}`
-    const manageOffset = editMode ? MANAGE_COL_W : 0
     const handlerColor = destinationColorMap[row.final_destination || ''] || ''
 
     // 그룹 경계 판단 (DisplayRow 기반)
@@ -1742,12 +1735,6 @@ export default function BookingTable({
           borderTop: isGroupStart ? groupBorder : colBorder,
           borderBottom: isGroupEnd ? groupBorder : 'none',
         }} />
-        {editMode && <td className="table-td sticky z-10" style={{
-          left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: '#fffbeb',
-          borderTop: isGroupStart ? groupBorder : colBorder,
-          borderBottom: isGroupEnd ? groupBorder : 'none',
-          borderLeft: colBorder, borderRight: colBorder,
-        }} />}
         {colsToRender.map((col, colIdx) => {
           const def = allColDefs[col]
           if (!def) return null
@@ -1759,7 +1746,7 @@ export default function BookingTable({
           const isMergedSpan = spanInfo.span > 1
 
           const isPinned = pinnedColumns.includes(col)
-          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, manageOffset)
+          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
           const isCellSel = isCellInRange(rowIdx, colIdx)
           const noTint = isMergeCol // 최종도착지/양하항/선사 = 음영 없음
           const tdIsGroupStart = isMergedSpan ? true : isGroupStart
@@ -1805,11 +1792,12 @@ export default function BookingTable({
             </td>
           )
         })}
-        {!editMode && <td className="table-td" style={{
+        <td className="table-td" style={{
+          minWidth: 90,
           borderTop: isGroupStart ? groupBorder : colBorder,
           borderBottom: isGroupEnd ? groupBorder : 'none',
           borderLeft: colBorder, borderRight: colBorder,
-        }} />}
+        }} />
       </tr>
     )
   }
@@ -2044,15 +2032,13 @@ export default function BookingTable({
         {editMode && <span className="text-blue-500 font-medium ml-2">✎ 편집 모드 — 편집 OFF 시 일괄 저장</span>}
       </div>
 
-      {/* 새 행 입력 섹션 (보라색 별도 공간) */}
-      {editMode && (
+      {/* 새 행 입력 섹션 (보라색 별도 공간) — 새 행이 있을 때만 표시 */}
+      {editMode && newRows.length > 0 && (
         <div className="bg-violet-50 rounded-xl border-2 border-violet-200 overflow-hidden flex-shrink-0">
-          <div className="px-4 py-2.5 bg-violet-100 border-b border-violet-200 flex items-center justify-between">
+          <div className="px-4 py-2 bg-violet-100 border-b border-violet-200 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold text-violet-800">새 행 입력</span>
-              {newRows.length > 0 && (
-                <span className="text-xs bg-violet-200 text-violet-700 px-2 py-0.5 rounded-full font-medium">{newRows.length}건</span>
-              )}
+              <span className="text-xs bg-violet-200 text-violet-700 px-2 py-0.5 rounded-full font-medium">{newRows.length}건</span>
             </div>
             <button onClick={handleAddNewRow}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 text-white text-xs rounded-lg hover:bg-violet-700 transition-colors font-medium">
@@ -2068,13 +2054,11 @@ export default function BookingTable({
                 <thead>
                   <tr className="bg-violet-100/70">
                     <th className="table-th w-9 text-violet-700 sticky left-0 z-20" style={{ backgroundColor: '#ede9fe' }} />
-                    <th className="table-th text-xs text-violet-700 sticky z-20"
-                      style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: '#ede9fe' }}>관리</th>
                     {colsToRender.map(col => {
                       const def = allColDefs[col]
                       if (!def) return null
                       const isPinned = pinnedColumns.includes(col)
-                      const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, MANAGE_COL_W)
+                      const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
                       return (
                         <th key={col}
                           className={`table-th text-xs text-violet-700 ${isPinned ? 'sticky z-20' : ''}`}
@@ -2083,6 +2067,7 @@ export default function BookingTable({
                         </th>
                       )
                     })}
+                    <th className="table-th text-xs text-violet-700 min-w-[90px]" style={{ backgroundColor: '#ede9fe' }}>관리</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2114,15 +2099,11 @@ export default function BookingTable({
                     else setSelectedRows(new Set(allProcessedIds))
                   }} className="rounded" />
                 </th>
-                {editMode && (
-                  <th className="table-th sticky z-30 text-xs min-w-0"
-                    style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, background: 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}>관리</th>
-                )}
                 {colsToRender.map(col => {
                   const def = allColDefs[col]
                   if (!def) return null
                   const isPinned = pinnedColumns.includes(col)
-                  const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, editMode ? MANAGE_COL_W : 0)
+                  const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths)
                   return (
                     <th key={col}
                       title={def.description || undefined}
@@ -2166,7 +2147,7 @@ export default function BookingTable({
                     </th>
                   )
                 })}
-                {!editMode && <th className="table-th min-w-[90px]" style={{ background: 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}>관리</th>}
+                <th className="table-th min-w-[90px]" style={{ background: 'linear-gradient(to bottom, #f8fafc, #eef2f7)' }}>관리</th>
               </tr>
             </thead>
             <tbody>
