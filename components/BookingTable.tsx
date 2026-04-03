@@ -55,8 +55,16 @@ function getWeekLabel(weekNum: number): string {
   return `${weekNum}주차 (${format(start, 'M/d')}~${format(end, 'M/d')})`
 }
 
-// 병합 대상 열 (계층 순서: 최종도착지 → 양하항 → 선사)
-const MERGE_HIERARCHY = ['final_destination', 'discharge_port', 'carrier'] as const
+function getWeekStartDate(weekNum: number): string {
+  return format(addDays(WEEK1_START, (weekNum - 1) * 7), 'yyyy-MM-dd')
+}
+
+function getWeekEndDate(weekNum: number): string {
+  return format(addDays(WEEK1_START, weekNum * 7 - 1), 'yyyy-MM-dd')
+}
+
+// 병합 대상 열 (최종도착지만 병합)
+const MERGE_HIERARCHY = ['final_destination'] as const
 
 // ── 기본 열 정의 ───────────────────────────────────────────────────
 
@@ -870,10 +878,21 @@ export default function BookingTable({
         { col: 'proforma_etd', dir: 'asc' },
       ]
       setSorts(blankSorts)
+      // RF분리 자동 활성화
+      setReeferSeparate(true)
+      // ETD 필터를 주차 범위에 맞게 설정
+      setEtdFrom(getWeekStartDate(blankWeekFrom))
+      setEtdTo(getWeekEndDate(blankWeekTo))
     }
   }
-  const setBlankWeekFrom = (v: number) => { _setBlankWeekFrom(v); ls('bk_blankWeekFrom', String(v)) }
-  const setBlankWeekTo = (v: number) => { _setBlankWeekTo(v); ls('bk_blankWeekTo', String(v)) }
+  const setBlankWeekFrom = (v: number) => {
+    _setBlankWeekFrom(v); ls('bk_blankWeekFrom', String(v))
+    if (blankSailingMode) setEtdFrom(getWeekStartDate(v))
+  }
+  const setBlankWeekTo = (v: number) => {
+    _setBlankWeekTo(v); ls('bk_blankWeekTo', String(v))
+    if (blankSailingMode) setEtdTo(getWeekEndDate(v))
+  }
   const setReeferSeparate = (v: boolean) => { _setReeferSeparate(v); ls('bk_reeferSeparate', String(v)) }
   const setSorts = (updater: SortItem[] | ((p: SortItem[]) => SortItem[])) => {
     _setSorts(prev => {
