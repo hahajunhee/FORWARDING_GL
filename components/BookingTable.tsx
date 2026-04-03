@@ -1642,6 +1642,7 @@ export default function BookingTable({
           const isPinned = pinnedColumns.includes(col)
           const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, manageOffset)
           const isCellSel = isCellInRange(rowIdx, colIdx)
+          const noTint = col === 'final_destination' || col === 'discharge_port' || col === 'carrier'
           let content: React.ReactNode = null
           if (col === 'vessel_name') content = <span className="text-amber-800 font-bold text-xs tracking-wider">⚓ BLANK SAILING</span>
           else if (col === 'week_no') content = <span className="text-xs text-amber-700 font-medium">{getWeekLabel(row.weekNum)}</span>
@@ -1660,7 +1661,7 @@ export default function BookingTable({
               style={{
                 minWidth: colWidths[col] || def.minW,
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
-                backgroundColor: isCellSel ? '#dbeafe' : (isPinned ? '#fffbeb' : undefined),
+                backgroundColor: isCellSel ? '#dbeafe' : noTint ? 'white' : (isPinned ? '#fffbeb' : undefined),
                 border: colBorder,
                 userSelect: 'none',
               }}>
