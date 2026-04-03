@@ -99,7 +99,7 @@ function ListManager({ listType, items, defaultItems, placeholder }: ListManager
                     <button onClick={() => moveItem(idx, 'down')} disabled={idx === orderedItems.length - 1 || isPending}
                       className="w-5 h-4 text-gray-300 hover:text-gray-600 disabled:opacity-20 text-xs leading-none text-center">↓</button>
                   </div>
-                  {listType === 'destination' && (
+                  {(listType === 'destination' || listType === 'carrier') && (
                     <div className="flex items-center gap-1">
                       <input
                         type="color"

@@ -580,8 +580,8 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
 
 // ── 뷰 셀 ─────────────────────────────────────────────────────────
 
-function ViewCell({ colKey, booking, currentUserId, customColumns }: {
-  colKey: string; booking: Booking; currentUserId: string; customColumns: ColumnDefinition[]
+function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorMap = {} }: {
+  colKey: string; booking: Booking; currentUserId: string; customColumns: ColumnDefinition[]; carrierColorMap?: Record<string, string>
 }) {
   switch (colKey) {
     case 'booking_no':
@@ -599,10 +599,13 @@ function ViewCell({ colKey, booking, currentUserId, customColumns }: {
       return <>{booking.final_destination || <span className="text-gray-300">-</span>}</>
     case 'discharge_port':
       return <>{booking.discharge_port || <span className="text-gray-300">-</span>}</>
-    case 'carrier':
+    case 'carrier': {
+      const cColor = carrierColorMap[booking.carrier || '']
       return booking.carrier
-        ? <span className="inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-medium">{booking.carrier}</span>
+        ? <span className="inline-block px-2 py-0.5 rounded text-xs font-medium"
+            style={{ backgroundColor: cColor || '#f3f4f6', color: cColor ? '#1f2937' : '#374151' }}>{booking.carrier}</span>
         : <span className="text-gray-300">-</span>
+    }
     case 'vessel_name':
       return <span className="text-xs">{booking.vessel_name || '-'}</span>
     case 'voyage':
@@ -955,6 +958,14 @@ export default function BookingTable({
     const map: Record<string, string> = {}
     for (const l of customLists) {
       if (l.list_type === 'destination' && l.color) map[l.name] = l.color
+    }
+    return map
+  }, [customLists])
+
+  const carrierColorMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const l of customLists) {
+      if (l.list_type === 'carrier' && l.color) map[l.name] = l.color
     }
     return map
   }, [customLists])
@@ -1693,7 +1704,7 @@ export default function BookingTable({
               }}>
               {canEditCell
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} />
-                : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} />
+                : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} />
               }
             </td>
           )
@@ -1772,7 +1783,10 @@ export default function BookingTable({
           else if (col === 'week_no') content = <span className="text-xs text-amber-700 font-medium">{getWeekLabel(row.weekNum)}</span>
           else if (col === 'final_destination') content = <span className="text-xs">{row.final_destination || '-'}</span>
           else if (col === 'discharge_port') content = <span className="text-xs">{row.discharge_port || '-'}</span>
-          else if (col === 'carrier') content = row.carrier ? <span className="inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-medium">{row.carrier}</span> : null
+          else if (col === 'carrier') {
+            const cColor = carrierColorMap[row.carrier || '']
+            content = row.carrier ? <span className="inline-block px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: cColor || '#f3f4f6', color: '#1f2937' }}>{row.carrier}</span> : null
+          }
 
           // 병합 셀 배경색: handlerColor 사용 (도착지 그룹 색상 유지), 비병합 merge열은 white
           const bgColor = isCellSel ? '#dbeafe'
