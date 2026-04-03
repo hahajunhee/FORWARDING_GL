@@ -1156,51 +1156,44 @@ export default function BookingTable({
   }, [processed, monthView])
 
   // ── BLANK SAILING 가상행 삽입 ────────────────────────────────────
+  // RF분리 + BLANK: 도착지별로 [비RF 부킹 + BLANK] → [RF 부킹] 순서
+  // BLANK는 비RF 부킹 기준으로만 판단 (RF는 매주 안 나오므로 BLANK 대상 아님)
   const displayRows: DisplayRow[] = useMemo(() => {
     if (!blankSailingMode) return processed
     const wFrom = blankWeekFrom
     const wTo = blankWeekTo
     if (wFrom > wTo) return processed
 
-    // 목적지별 주차 수집 (processed는 이미 정렬됨: 도착지→proforma_etd asc)
-    const destWeeks: Record<string, Set<number>> = {}
+    // 도착지별 그룹핑
     const destBookings: Record<string, Booking[]> = {}
     const destOrder: string[] = []
     const destMeta: Record<string, { discharge_port: string; carrier: string }> = {}
     for (const b of processed) {
       const dest = b.final_destination || ''
-      if (!destWeeks[dest]) {
-        destWeeks[dest] = new Set(); destBookings[dest] = []; destOrder.push(dest)
+      if (!destBookings[dest]) {
+        destBookings[dest] = []; destOrder.push(dest)
         destMeta[dest] = { discharge_port: b.discharge_port || '', carrier: b.carrier || '' }
       }
-      const wn = getWeekNum(b.proforma_etd)
-      if (wn !== null) destWeeks[dest].add(wn)
       destBookings[dest].push(b)
     }
 
-    // 주차 범위 내에서 빈 주차를 각 도착지별로 삽입
     const result: DisplayRow[] = []
     for (const dest of destOrder) {
-      const bookings = destBookings[dest]
-      const existing = destWeeks[dest]
+      const all = destBookings[dest]
       const meta = destMeta[dest] || { discharge_port: '', carrier: '' }
-      // 부킹행은 proforma_etd 오름차순이므로 주차 순서로 삽입
-      // 매 주차에 대해: 해당 주차 부킹 먼저 (리퍼 전용 제외), 없으면 BLANK SAILING
+
+      // RF 포함 행과 비RF 행을 분리
+      const rfRows = all.filter(b => hasReeferContainer(b))
+      const nonRfRows = all.filter(b => !hasReeferContainer(b))
+
+      // 비RF 부킹: 주차별로 정렬하며 빈 주차에 BLANK SAILING 삽입
+      const nonRfWeeks = new Set(nonRfRows.map(b => getWeekNum(b.proforma_etd)).filter((w): w is number => w !== null))
       for (let wn = wFrom; wn <= wTo; wn++) {
-        const weekBookings = bookings.filter(b => getWeekNum(b.proforma_etd) === wn)
-        const nonReeferBookings = weekBookings.filter(b => !isReeferOnly(b))
-        // 리퍼 전용이 아닌 부킹이 있으면 BLANK 아님 — 전체 weekBookings 표시
-        if (nonReeferBookings.length > 0) {
-          result.push(...weekBookings)
-        } else if (weekBookings.length > 0) {
-          // 리퍼 전용 부킹만 있음 → BLANK SAILING + 리퍼 부킹도 표시
-          result.push(...weekBookings)
-          result.push({
-            _blankSailing: true, id: `blank-${dest}-${wn}`,
-            final_destination: dest, discharge_port: meta.discharge_port, carrier: meta.carrier,
-            weekNum: wn,
-          })
+        const weekNonRf = nonRfRows.filter(b => getWeekNum(b.proforma_etd) === wn)
+        if (weekNonRf.length > 0) {
+          result.push(...weekNonRf)
         } else {
+          // 비RF 부킹이 없는 주차 → BLANK SAILING
           result.push({
             _blankSailing: true, id: `blank-${dest}-${wn}`,
             final_destination: dest, discharge_port: meta.discharge_port, carrier: meta.carrier,
@@ -1208,12 +1201,15 @@ export default function BookingTable({
           })
         }
       }
-      // 주차 범위 밖 부킹도 끝에 추가
-      const outsideBookings = bookings.filter(b => {
+      // 주차 범위 밖 비RF 부킹도 추가
+      const outsideNonRf = nonRfRows.filter(b => {
         const wn = getWeekNum(b.proforma_etd)
         return wn === null || wn < wFrom || wn > wTo
       })
-      if (outsideBookings.length > 0) result.push(...outsideBookings)
+      if (outsideNonRf.length > 0) result.push(...outsideNonRf)
+
+      // RF 부킹: BLANK 판단 없이 그대로 하단에 추가
+      if (rfRows.length > 0) result.push(...rfRows)
     }
     return result
   }, [processed, blankSailingMode, blankWeekFrom, blankWeekTo])
