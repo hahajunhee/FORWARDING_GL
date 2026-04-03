@@ -15,6 +15,8 @@ interface BlankSailingRow {
   _blankSailing: true
   id: string
   final_destination: string
+  discharge_port: string
+  carrier: string
   weekNum: number
 }
 
@@ -214,7 +216,9 @@ function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]
 
 type SpanInfo = { span: number; skip: boolean }
 
-function buildSpanMaps(rows: Booking[], mergeEnabled: boolean): Record<string, SpanInfo[]> {
+type MergeableRow = { final_destination?: string | null; discharge_port?: string | null; carrier?: string | null }
+
+function buildSpanMaps(rows: MergeableRow[], mergeEnabled: boolean): Record<string, SpanInfo[]> {
   const empty = () => rows.map((): SpanInfo => ({ span: 1, skip: false }))
   const maps: Record<string, SpanInfo[]> = {
     final_destination: empty(),
@@ -223,9 +227,9 @@ function buildSpanMaps(rows: Booking[], mergeEnabled: boolean): Record<string, S
   }
   if (!mergeEnabled || rows.length === 0) return maps
 
-  const fd = (b: Booking) => b.final_destination || ''
-  const dp = (b: Booking) => b.discharge_port || ''
-  const ca = (b: Booking) => b.carrier || ''
+  const fd = (b: MergeableRow) => b.final_destination || ''
+  const dp = (b: MergeableRow) => b.discharge_port || ''
+  const ca = (b: MergeableRow) => b.carrier || ''
 
   // 1. final_destination — 상위 제약 없음
   let i = 0
@@ -991,9 +995,12 @@ export default function BookingTable({
           const col = cols[c]
           if (!col) continue
           if ('_blankSailing' in bk) {
+            const bs = bk as BlankSailingRow
             if (col === 'vessel_name') row.push('BLANK SAILING')
-            else if (col === 'week_no') row.push(getWeekLabel((bk as BlankSailingRow).weekNum))
-            else if (col === 'final_destination') row.push((bk as BlankSailingRow).final_destination)
+            else if (col === 'week_no') row.push(getWeekLabel(bs.weekNum))
+            else if (col === 'final_destination') row.push(bs.final_destination)
+            else if (col === 'discharge_port') row.push(bs.discharge_port)
+            else if (col === 'carrier') row.push(bs.carrier)
             else row.push('')
           } else {
             row.push(getCellTextValueRef.current(bk as Booking, col))
@@ -1097,9 +1104,13 @@ export default function BookingTable({
     const destWeeks: Record<string, Set<number>> = {}
     const destBookings: Record<string, Booking[]> = {}
     const destOrder: string[] = []
+    const destMeta: Record<string, { discharge_port: string; carrier: string }> = {}
     for (const b of processed) {
       const dest = b.final_destination || ''
-      if (!destWeeks[dest]) { destWeeks[dest] = new Set(); destBookings[dest] = []; destOrder.push(dest) }
+      if (!destWeeks[dest]) {
+        destWeeks[dest] = new Set(); destBookings[dest] = []; destOrder.push(dest)
+        destMeta[dest] = { discharge_port: b.discharge_port || '', carrier: b.carrier || '' }
+      }
       const wn = getWeekNum(b.proforma_etd)
       if (wn !== null) destWeeks[dest].add(wn)
       destBookings[dest].push(b)
@@ -1110,15 +1121,19 @@ export default function BookingTable({
     for (const dest of destOrder) {
       const bookings = destBookings[dest]
       const existing = destWeeks[dest]
+      const meta = destMeta[dest] || { discharge_port: '', carrier: '' }
       // 부킹행은 proforma_etd 오름차순이므로 주차 순서로 삽입
       // 매 주차에 대해: 해당 주차 부킹 먼저, 없으면 BLANK SAILING
       for (let wn = wFrom; wn <= wTo; wn++) {
-        // 이 주차에 해당하는 부킹 추출
         const weekBookings = bookings.filter(b => getWeekNum(b.proforma_etd) === wn)
         if (weekBookings.length > 0) {
           result.push(...weekBookings)
         } else {
-          result.push({ _blankSailing: true, id: `blank-${dest}-${wn}`, final_destination: dest, weekNum: wn })
+          result.push({
+            _blankSailing: true, id: `blank-${dest}-${wn}`,
+            final_destination: dest, discharge_port: meta.discharge_port, carrier: meta.carrier,
+            weekNum: wn,
+          })
         }
       }
       // 주차 범위 밖 부킹도 끝에 추가
@@ -1629,7 +1644,7 @@ export default function BookingTable({
     )
   }
 
-  function renderBlankSailingRow(row: BlankSailingRow, rowIdx: number) {
+  function renderBlankSailingRow(row: BlankSailingRow, rowIdx: number, rowSpans: Record<string, SpanInfo>) {
     const colBorder = `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`
     const manageOffset = editMode ? MANAGE_COL_W : 0
     return (
@@ -1639,6 +1654,13 @@ export default function BookingTable({
         {colsToRender.map((col, colIdx) => {
           const def = allColDefs[col]
           if (!def) return null
+
+          // 병합 처리
+          const isMergeCol = MERGE_HIERARCHY.includes(col as typeof MERGE_HIERARCHY[number])
+          const spanInfo = isMergeCol ? (rowSpans[col] ?? { span: 1, skip: false }) : { span: 1, skip: false }
+          if (spanInfo.skip) return null
+          const rowSpan = spanInfo.span > 1 ? spanInfo.span : undefined
+
           const isPinned = pinnedColumns.includes(col)
           const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, manageOffset)
           const isCellSel = isCellInRange(rowIdx, colIdx)
@@ -1646,8 +1668,12 @@ export default function BookingTable({
           let content: React.ReactNode = null
           if (col === 'vessel_name') content = <span className="text-amber-800 font-bold text-xs tracking-wider">⚓ BLANK SAILING</span>
           else if (col === 'week_no') content = <span className="text-xs text-amber-700 font-medium">{getWeekLabel(row.weekNum)}</span>
+          else if (col === 'final_destination') content = <span className="text-xs">{row.final_destination || '-'}</span>
+          else if (col === 'discharge_port') content = <span className="text-xs">{row.discharge_port || '-'}</span>
+          else if (col === 'carrier') content = row.carrier ? <span className="inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-medium">{row.carrier}</span> : null
           return (
             <td key={col}
+              rowSpan={rowSpan}
               onMouseDown={e => {
                 if (e.button !== 0) return
                 isMouseSelecting.current = true
@@ -1663,6 +1689,7 @@ export default function BookingTable({
                 backgroundColor: isCellSel ? '#dbeafe' : noTint ? 'white' : (isPinned ? '#fffbeb' : undefined),
                 border: colBorder,
                 userSelect: 'none',
+                ...(spanInfo.span > 1 ? { verticalAlign: 'middle' } : {}),
               }}>
               {content}
             </td>
@@ -1677,18 +1704,17 @@ export default function BookingTable({
     const effectiveMerge = mergeEnabled && !editMode
 
     function renderRows(rows: DisplayRow[], baseRowIdx: number = 0) {
-      // blank sailing 제외한 실제 부킹 행만 span 계산
-      const bookingSubset: Booking[] = rows.filter((r): r is Booking => !('_blankSailing' in r))
-      const spanMaps = buildSpanMaps(bookingSubset, effectiveMerge)
-      let bkIdx = 0
+      // BLANK SAILING 포함 전체 행으로 span 계산 (병합 시 도착지/양하항/선사 그룹 유지)
+      const spanMaps = buildSpanMaps(rows as MergeableRow[], effectiveMerge)
       return rows.map((r, i) => {
-        if ('_blankSailing' in r) return renderBlankSailingRow(r as BlankSailingRow, baseRowIdx + i)
-        const b = r as Booking
         const rowSpans: Record<string, SpanInfo> = {}
-        for (const col of MERGE_HIERARCHY) rowSpans[col] = spanMaps[col][bkIdx]
-        const prevBk = bkIdx > 0 ? bookingSubset[bkIdx - 1] : null
-        const nextBk = bkIdx < bookingSubset.length - 1 ? bookingSubset[bkIdx + 1] : null
-        bkIdx++
+        for (const col of MERGE_HIERARCHY) rowSpans[col] = spanMaps[col][i]
+        if ('_blankSailing' in r) return renderBlankSailingRow(r as BlankSailingRow, baseRowIdx + i, rowSpans)
+        const b = r as Booking
+        const prevRow = i > 0 ? rows[i - 1] : null
+        const nextRow = i < rows.length - 1 ? rows[i + 1] : null
+        const prevBk = prevRow && !('_blankSailing' in prevRow) ? prevRow as Booking : (i > 1 ? (() => { for (let j = i - 1; j >= 0; j--) { if (!('_blankSailing' in rows[j])) return rows[j] as Booking }; return null })() : null)
+        const nextBk = nextRow && !('_blankSailing' in nextRow) ? nextRow as Booking : (i < rows.length - 2 ? (() => { for (let j = i + 1; j < rows.length; j++) { if (!('_blankSailing' in rows[j])) return rows[j] as Booking }; return null })() : null)
         return renderDataRow(b, rowSpans, baseRowIdx + i, prevBk, nextBk)
       })
     }
