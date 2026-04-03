@@ -2,11 +2,38 @@
 
 import { useState, useMemo, useTransition, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { differenceInCalendarDays, parseISO, isValid, format } from 'date-fns'
+import { differenceInCalendarDays, parseISO, isValid, format, addDays } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import type { Booking, Profile, CustomList, ColumnDefinition, BookingEntry, TableStyle } from '@/types'
 import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, CARRIERS, MAJOR_PORTS, DEFAULT_DESTINATIONS, DEFAULT_TABLE_STYLE } from '@/types'
 import { deleteBooking, saveColumnOrder, bulkSaveBookings, bulkDeleteBookings } from '@/app/bookings/actions'
+
+// ── BLANK SAILING / 주차 헬퍼 ───────────────────────────────────
+const WEEK1_START = new Date('2025-12-29') // 1주차 기준일(월요일)
+
+interface BlankSailingRow {
+  _blankSailing: true
+  id: string
+  final_destination: string
+  weekNum: number
+}
+
+type DisplayRow = Booking | BlankSailingRow
+
+function getWeekNum(d: string | null | undefined): number | null {
+  if (!d) return null
+  try {
+    const p = parseISO(d)
+    if (!isValid(p)) return null
+    return Math.floor(differenceInCalendarDays(p, WEEK1_START) / 7) + 1
+  } catch { return null }
+}
+
+function getWeekLabel(weekNum: number): string {
+  const start = addDays(WEEK1_START, (weekNum - 1) * 7)
+  const end = addDays(start, 6)
+  return `${weekNum}주차 (${format(start, 'M/d')}~${format(end, 'M/d')})`
+}
 
 // 병합 대상 열 (계층 순서: 최종도착지 → 양하항 → 선사)
 const MERGE_HIERARCHY = ['final_destination', 'discharge_port', 'carrier'] as const
@@ -33,6 +60,7 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   containers:           { label: '컨테이너',        minW: 120 },
   final_qty:            { label: '최종수량',        minW: 80  },
   remarks:              { label: '비고',            minW: 160 },
+  week_no:              { label: '주차',             minW: 150 },
 }
 
 // pinnedColumns 기준으로 sticky left 오프셋 계산 (colWidths 반영)
@@ -232,15 +260,27 @@ function buildSpanMaps(rows: Booking[], mergeEnabled: boolean): Record<string, S
   return maps
 }
 
-function exportToExcel(rows: Booking[], customColumns: ColumnDefinition[]) {
+function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
   import('xlsx').then((XLSX) => {
-    const data = rows.map(b => {
+    const data = rows.map(r => {
+      if ('_blankSailing' in r) {
+        return {
+          '부킹번호': '', '최종도착지': r.final_destination, '양하항': '', '담당선사': '',
+          '모선명': 'BLANK SAILING', '주차': getWeekLabel(r.weekNum), '확보선복': '', 'MQC': '',
+          '고객사서류담당': '', '포워더담당자': '', '서류마감일': '', 'Proforma ETD': '',
+          'Updated ETD': '', 'ETA': '', '20일반': '', '20DG': '', '20리퍼': '',
+          '40일반': '', '40DG': '', '40리퍼': '', '비고': '',
+        }
+      }
+      const b = r as Booking
       const bookingNos = (b.booking_entries && b.booking_entries.length > 0)
         ? b.booking_entries.map(e => e.no).join(' / ')
         : b.booking_no
+      const wn = getWeekNum(b.updated_etd || b.proforma_etd)
       const base: Record<string, unknown> = {
         '부킹번호': bookingNos, '최종도착지': b.final_destination, '양하항': b.discharge_port,
-        '담당선사': b.carrier, '모선명': b.vessel_name, '확보선복': b.secured_space, 'MQC': b.mqc,
+        '담당선사': b.carrier, '모선명': b.vessel_name, '주차': wn !== null ? getWeekLabel(wn) : '',
+        '확보선복': b.secured_space, 'MQC': b.mqc,
         '고객사서류담당': b.customer_doc_handler, '포워더담당자': b.forwarder_handler?.name || '',
         '서류마감일': b.doc_cutoff_date || '', 'Proforma ETD': b.proforma_etd || '',
         'Updated ETD': b.updated_etd || '', 'ETA': b.eta || '',
@@ -566,6 +606,12 @@ function ViewCell({ colKey, booking, currentUserId, customColumns }: {
         </span>
       )
     }
+    case 'week_no': {
+      const wn = getWeekNum(booking.updated_etd || booking.proforma_etd)
+      return wn !== null
+        ? <span className="text-xs text-indigo-700 font-medium">{getWeekLabel(wn)}</span>
+        : <span className="text-gray-300 text-xs">-</span>
+    }
     case 'proforma_etd':
       return <span className="text-gray-700 text-xs font-medium">{fmtDate(booking.proforma_etd)}</span>
     case 'updated_etd':
@@ -703,6 +749,7 @@ export default function BookingTable({
   const [sorts, _setSorts] = useState<SortItem[]>([])
   const [monthView, _setMonthView] = useState(false)
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set())
+  const [blankSailingMode, _setBlankSailingMode] = useState(false)
 
   // ── 필터 상태 (localStorage 영속) ────────────────────────────────
   const [viewMode, _setViewMode] = useState<'all' | 'mine'>('all')
@@ -729,7 +776,7 @@ export default function BookingTable({
   const isMouseSelecting = useRef(false)
   const [isDragSelecting, setIsDragSelecting] = useState(false)
   const processedRef = useRef<Booking[]>([])
-  const visualOrderRef = useRef<Booking[]>([])
+  const visualOrderRef = useRef<DisplayRow[]>([])
   const allColDefsRef = useRef(allColDefs)
   const editModeRef = useRef(editMode)
   editModeRef.current = editMode
@@ -755,6 +802,7 @@ export default function BookingTable({
       if (cusf) _setCustomersFilter(cusf)
       if (localStorage.getItem('bk_monthView') === 'true') _setMonthView(true)
       if (localStorage.getItem('bk_mergeEnabled') === 'false') _setMergeEnabled(false)
+      if (localStorage.getItem('bk_blankSailing') === 'true') _setBlankSailingMode(true)
       const storedSorts = localStorage.getItem('bk_sorts')
       if (storedSorts) _setSorts(JSON.parse(storedSorts))
       const storedWidths = localStorage.getItem('bk_col_widths')
@@ -786,6 +834,7 @@ export default function BookingTable({
   const setRegionFilter = (v: string) => { _setRegionFilter(v); ls('bk_regionFilter', v) }
   const setCustomersFilter = (v: string) => { _setCustomersFilter(v); ls('bk_customersFilter', v) }
   const setMergeEnabled = (v: boolean) => { _setMergeEnabled(v); ls('bk_mergeEnabled', String(v)) }
+  const setBlankSailingMode = (v: boolean) => { _setBlankSailingMode(v); ls('bk_blankSailing', String(v)) }
   const setSorts = (updater: SortItem[] | ((p: SortItem[]) => SortItem[])) => {
     _setSorts(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
@@ -815,6 +864,7 @@ export default function BookingTable({
       case 'handler_region': return booking.forwarder_handler?.region || ''
       case 'handler_customers': return booking.forwarder_handler?.customers || ''
       case 'doc_cutoff_date': return fmtDate(booking.doc_cutoff_date)
+      case 'week_no': { const wn = getWeekNum(booking.updated_etd || booking.proforma_etd); return wn !== null ? getWeekLabel(wn) : '-' }
       case 'proforma_etd': return fmtDate(booking.proforma_etd)
       case 'updated_etd': return fmtDate(booking.updated_etd)
       case 'eta': return fmtDate(booking.eta)
@@ -922,7 +972,15 @@ export default function BookingTable({
         const row: string[] = []
         for (let c = minC; c <= maxC; c++) {
           const col = cols[c]
-          if (col) row.push(getCellTextValueRef.current(bk, col))
+          if (!col) continue
+          if ('_blankSailing' in bk) {
+            if (col === 'vessel_name') row.push('BLANK SAILING')
+            else if (col === 'week_no') row.push(getWeekLabel((bk as BlankSailingRow).weekNum))
+            else if (col === 'final_destination') row.push((bk as BlankSailingRow).final_destination)
+            else row.push('')
+          } else {
+            row.push(getCellTextValueRef.current(bk as Booking, col))
+          }
         }
         rows.push(row)
       }
@@ -1011,14 +1069,49 @@ export default function BookingTable({
     return keys.map(key => ({ key, rows: map[key] }))
   }, [processed, monthView])
 
+  // ── BLANK SAILING 가상행 삽입 ────────────────────────────────────
+  const displayRows: DisplayRow[] = useMemo(() => {
+    if (!blankSailingMode) return processed
+    // 목적지별 주차 수집
+    const destWeeks: Record<string, Set<number>> = {}
+    const destBookings: Record<string, Booking[]> = {}
+    const destOrder: string[] = []
+    for (const b of processed) {
+      const dest = b.final_destination || ''
+      if (!destWeeks[dest]) { destWeeks[dest] = new Set(); destBookings[dest] = []; destOrder.push(dest) }
+      const wn = getWeekNum(b.updated_etd || b.proforma_etd)
+      if (wn !== null) destWeeks[dest].add(wn)
+      destBookings[dest].push(b)
+    }
+    let globalMin = Infinity, globalMax = -Infinity
+    for (const ws of Object.values(destWeeks)) {
+      for (const wn of ws) {
+        if (wn < globalMin) globalMin = wn
+        if (wn > globalMax) globalMax = wn
+      }
+    }
+    if (globalMin === Infinity) return processed
+    const result: DisplayRow[] = []
+    for (const dest of destOrder) {
+      result.push(...destBookings[dest])
+      const existing = destWeeks[dest]
+      for (let wn = globalMin; wn <= globalMax; wn++) {
+        if (!existing.has(wn)) {
+          result.push({ _blankSailing: true, id: `blank-${dest}-${wn}`, final_destination: dest, weekNum: wn })
+        }
+      }
+    }
+    return result
+  }, [processed, blankSailingMode])
+
   // visualOrderRef: 화면에 실제 렌더되는 행 순서를 추적 (monthView 재정렬 대응)
   useEffect(() => {
     if (monthView && monthGroups) {
       visualOrderRef.current = monthGroups.flatMap(g => g.rows)
     } else {
-      visualOrderRef.current = processed
+      visualOrderRef.current = displayRows
     }
-  }, [processed, monthGroups, monthView])
+  }, [displayRows, monthGroups, monthView])
 
   // ── 편집 모드 토글: OFF 시 일괄 저장 ──────────────────────────────
 
@@ -1161,8 +1254,9 @@ export default function BookingTable({
     const startCol = cellSelStart.colIdx
     const batchEdits: Record<string, Partial<Booking>> = {}
     for (let ri = 0; ri < pasteRows.length; ri++) {
-      const booking = visualOrderRef.current[startRow + ri]
-      if (!booking) continue
+      const bookingRaw = visualOrderRef.current[startRow + ri]
+      if (!bookingRaw || '_blankSailing' in bookingRaw) continue
+      const booking = bookingRaw as Booking
       if (booking.forwarder_handler_id !== currentUserId && !pasteRows[ri].some((_, ci) => colsToRender[startCol + ci] === 'forwarder_handler')) continue
       const changes: Partial<Booking> = {}
       for (let ci = 0; ci < pasteRows[ri].length; ci++) {
@@ -1460,8 +1554,8 @@ export default function BookingTable({
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
                 ...(isPinned ? { backgroundColor: isCellSel ? '#bfdbfe' : (handlerColor || 'white') } : {}),
                 ...(isCellSel && !isPinned ? { backgroundColor: '#dbeafe' } : {}),
-                borderTop: isActive ? '2px solid #ef4444' : tdIsGroupStart ? groupBorder : (isMergeCol ? '1px solid transparent' : colBorder),
-                borderBottom: isActive ? '2px solid #ef4444' : tdIsGroupEnd ? groupBorder : (isMergeCol ? '1px solid transparent' : 'none'),
+                borderTop: isActive ? '2px solid #ef4444' : tdIsGroupStart ? groupBorder : ((isMergeCol && mergeEnabled && !editMode) ? '1px solid transparent' : colBorder),
+                borderBottom: isActive ? '2px solid #ef4444' : tdIsGroupEnd ? groupBorder : ((isMergeCol && mergeEnabled && !editMode) ? '1px solid transparent' : 'none'),
                 borderLeft: isActive ? '2px solid #ef4444' : isCellSel ? '1px solid #93c5fd' : colBorder,
                 borderRight: isActive ? '2px solid #ef4444' : isCellSel ? '1px solid #93c5fd' : colBorder,
                 ...(isMergedSpan ? { verticalAlign: 'middle' } : {}),
@@ -1508,15 +1602,67 @@ export default function BookingTable({
     )
   }
 
+  function renderBlankSailingRow(row: BlankSailingRow, rowIdx: number) {
+    const colBorder = `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`
+    const manageOffset = editMode ? MANAGE_COL_W : 0
+    return (
+      <tr key={row.id} className="bg-amber-50">
+        <td className="table-td w-9 sticky left-0 z-10" style={{ backgroundColor: '#fffbeb', border: colBorder }} />
+        {editMode && <td className="table-td sticky z-10" style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: '#fffbeb', border: colBorder }} />}
+        {colsToRender.map((col, colIdx) => {
+          const def = allColDefs[col]
+          if (!def) return null
+          const isPinned = pinnedColumns.includes(col)
+          const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, manageOffset)
+          const isCellSel = isCellInRange(rowIdx, colIdx)
+          let content: React.ReactNode = null
+          if (col === 'vessel_name') content = <span className="text-amber-800 font-bold text-xs tracking-wider">⚓ BLANK SAILING</span>
+          else if (col === 'week_no') content = <span className="text-xs text-amber-700 font-medium">{getWeekLabel(row.weekNum)}</span>
+          else if (col === 'final_destination') content = <span className="text-xs text-gray-500">{row.final_destination}</span>
+          return (
+            <td key={col}
+              onMouseDown={e => {
+                if (e.button !== 0) return
+                isMouseSelecting.current = true
+                setIsDragSelecting(true)
+                setCellSelStart({ rowIdx, colIdx })
+                setCellSelEnd({ rowIdx, colIdx })
+              }}
+              onMouseEnter={() => { if (!isMouseSelecting.current) return; setCellSelEnd({ rowIdx, colIdx }) }}
+              className={`table-td text-xs ${isPinned ? 'sticky z-10' : ''}`}
+              style={{
+                minWidth: colWidths[col] || def.minW,
+                ...(fixedLeft !== null ? { left: fixedLeft } : {}),
+                backgroundColor: isCellSel ? '#dbeafe' : (isPinned ? '#fffbeb' : undefined),
+                border: colBorder,
+                userSelect: 'none',
+              }}>
+              {content}
+            </td>
+          )
+        })}
+        {!editMode && <td className="table-td" style={{ border: colBorder }} />}
+      </tr>
+    )
+  }
+
   function renderBody() {
     const effectiveMerge = mergeEnabled && !editMode
 
-    function renderRows(rows: Booking[], baseRowIdx: number = 0) {
-      const spanMaps = buildSpanMaps(rows, effectiveMerge)
-      return rows.map((b, i) => {
+    function renderRows(rows: DisplayRow[], baseRowIdx: number = 0) {
+      // blank sailing 제외한 실제 부킹 행만 span 계산
+      const bookingSubset: Booking[] = rows.filter((r): r is Booking => !('_blankSailing' in r))
+      const spanMaps = buildSpanMaps(bookingSubset, effectiveMerge)
+      let bkIdx = 0
+      return rows.map((r, i) => {
+        if ('_blankSailing' in r) return renderBlankSailingRow(r as BlankSailingRow, baseRowIdx + i)
+        const b = r as Booking
         const rowSpans: Record<string, SpanInfo> = {}
-        for (const col of MERGE_HIERARCHY) rowSpans[col] = spanMaps[col][i]
-        return renderDataRow(b, rowSpans, baseRowIdx + i, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null)
+        for (const col of MERGE_HIERARCHY) rowSpans[col] = spanMaps[col][bkIdx]
+        const prevBk = bkIdx > 0 ? bookingSubset[bkIdx - 1] : null
+        const nextBk = bkIdx < bookingSubset.length - 1 ? bookingSubset[bkIdx + 1] : null
+        bkIdx++
+        return renderDataRow(b, rowSpans, baseRowIdx + i, prevBk, nextBk)
       })
     }
 
@@ -1545,7 +1691,7 @@ export default function BookingTable({
         </>
       )
     }
-    return <>{renderRows(processed)}</>
+    return <>{renderRows(displayRows)}</>
   }
 
   const editBtnLabel = bulkSaving ? '저장 중...' : editMode ? '편집 OFF (저장)' : '편집'
@@ -1662,6 +1808,11 @@ export default function BookingTable({
               className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${monthView ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
               월별
             </button>
+            <button onClick={() => setBlankSailingMode(!blankSailingMode)}
+              title="목적지별 주차에 부킹 없는 경우 BLANK SAILING 행 표시"
+              className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${blankSailingMode ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+              ⚓ BLANK
+            </button>
             <button onClick={() => exportInlandTransport(processed)} disabled={processed.length === 0}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1669,7 +1820,7 @@ export default function BookingTable({
               </svg>
               내륙운송
             </button>
-            <button onClick={() => exportToExcel(processed, customColumns)} disabled={processed.length === 0}
+            <button onClick={() => exportToExcel(displayRows, customColumns)} disabled={displayRows.length === 0}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />

@@ -127,6 +127,7 @@ export const DEFAULT_COLUMN_ORDER = [
   'containers',
   'final_qty',
   'remarks',
+  'week_no',
 ]
 
 export const DEFAULT_PINNED_COLUMNS = ['forwarder_handler', 'discharge_port', 'final_destination']
