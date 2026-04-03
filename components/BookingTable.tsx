@@ -31,6 +31,24 @@ function getWeekNum(d: string | null | undefined): number | null {
   } catch { return null }
 }
 
+// 리퍼 전용 행 판별: 컨테이너가 40RF/리퍼만 있으면 true
+function isReeferOnly(b: Booking): boolean {
+  if (b.booking_entries && b.booking_entries.length > 0) {
+    return b.booking_entries.every(e => /rf|reefer|리퍼/i.test(e.ctr_type))
+  }
+  const hasNonReefer = (b.qty_20_normal || 0) + (b.qty_20_dg || 0) + (b.qty_20_reefer || 0)
+    + (b.qty_40_normal || 0) + (b.qty_40_dg || 0)
+  return hasNonReefer === 0 && (b.qty_40_reefer || 0) > 0
+}
+
+// RF 컨테이너 포함 여부 (리퍼별도 정렬용)
+function hasReeferContainer(b: Booking): boolean {
+  if (b.booking_entries && b.booking_entries.length > 0) {
+    return b.booking_entries.some(e => /rf|reefer|리퍼/i.test(e.ctr_type))
+  }
+  return (b.qty_20_reefer || 0) > 0 || (b.qty_40_reefer || 0) > 0
+}
+
 function getWeekLabel(weekNum: number): string {
   const start = addDays(WEEK1_START, (weekNum - 1) * 7)
   const end = addDays(start, 6)
@@ -756,6 +774,8 @@ export default function BookingTable({
   const [blankSailingMode, _setBlankSailingMode] = useState(false)
   const [blankWeekFrom, _setBlankWeekFrom] = useState(14)
   const [blankWeekTo, _setBlankWeekTo] = useState(18)
+  const [reeferSeparate, _setReeferSeparate] = useState(false)
+  const tableWrapperRef = useRef<HTMLDivElement>(null)
 
   // ── 필터 상태 (localStorage 영속) ────────────────────────────────
   const [viewMode, _setViewMode] = useState<'all' | 'mine'>('all')
@@ -811,6 +831,7 @@ export default function BookingTable({
       if (localStorage.getItem('bk_blankSailing') === 'true') _setBlankSailingMode(true)
       const bwf = localStorage.getItem('bk_blankWeekFrom'); if (bwf) _setBlankWeekFrom(Number(bwf))
       const bwt = localStorage.getItem('bk_blankWeekTo'); if (bwt) _setBlankWeekTo(Number(bwt))
+      if (localStorage.getItem('bk_reeferSeparate') === 'true') _setReeferSeparate(true)
       const storedSorts = localStorage.getItem('bk_sorts')
       if (storedSorts) _setSorts(JSON.parse(storedSorts))
       const storedWidths = localStorage.getItem('bk_col_widths')
@@ -856,6 +877,7 @@ export default function BookingTable({
   }
   const setBlankWeekFrom = (v: number) => { _setBlankWeekFrom(v); ls('bk_blankWeekFrom', String(v)) }
   const setBlankWeekTo = (v: number) => { _setBlankWeekTo(v); ls('bk_blankWeekTo', String(v)) }
+  const setReeferSeparate = (v: boolean) => { _setReeferSeparate(v); ls('bk_reeferSeparate', String(v)) }
   const setSorts = (updater: SortItem[] | ((p: SortItem[]) => SortItem[])) => {
     _setSorts(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
@@ -1070,8 +1092,32 @@ export default function BookingTable({
         return 0
       })
     }
+    // 리퍼별도: 도착지 기준으로 그룹핑, RF 없는 행 상단 / RF 있는 행 하단
+    if (reeferSeparate) {
+      const destOrderMap = destinationSortOrder.length > 0
+        ? Object.fromEntries(destinationSortOrder.map((d, i) => [d, i]))
+        : null
+      // 항상 도착지 기준 그룹핑 (기존 정렬 위에 도착지 + RF 우선순위 추가)
+      result = [...result].sort((a, b) => {
+        // 1) 도착지
+        const da = a.final_destination || '', db = b.final_destination || ''
+        if (da !== db) {
+          if (destOrderMap) {
+            const ia = destOrderMap[da] ?? 9999, ib = destOrderMap[db] ?? 9999
+            if (ia !== ib) return ia - ib
+          }
+          return da < db ? -1 : 1
+        }
+        // 2) RF 없음 = 0 (상단), RF 있음 = 1 (하단)
+        const ra = hasReeferContainer(a) ? 1 : 0
+        const rb = hasReeferContainer(b) ? 1 : 0
+        if (ra !== rb) return ra - rb
+        // 3) 기존 정렬 유지 (안정 정렬)
+        return 0
+      })
+    }
     return result
-  }, [bookings, viewMode, carrierFilter, handlerFilter, regionFilter, customersFilter, etdFrom, etdTo, docFilter, sorts, currentUserId, customColumns])
+  }, [bookings, viewMode, carrierFilter, handlerFilter, regionFilter, customersFilter, etdFrom, etdTo, docFilter, sorts, currentUserId, customColumns, reeferSeparate, destinationSortOrder])
 
   // processedRef를 항상 최신 processed로 동기화
   useEffect(() => { processedRef.current = processed }, [processed])
@@ -1122,16 +1168,6 @@ export default function BookingTable({
       const bookings = destBookings[dest]
       const existing = destWeeks[dest]
       const meta = destMeta[dest] || { discharge_port: '', carrier: '' }
-      // 리퍼 전용 행 판별: 컨테이너가 40RF/리퍼만 있으면 true
-      const isReeferOnly = (b: Booking): boolean => {
-        if (b.booking_entries && b.booking_entries.length > 0) {
-          return b.booking_entries.every(e => /rf|reefer|리퍼/i.test(e.ctr_type))
-        }
-        // 구식 필드: 40리퍼만 있고 나머지 전부 0
-        const hasNonReefer = (b.qty_20_normal || 0) + (b.qty_20_dg || 0) + (b.qty_20_reefer || 0)
-          + (b.qty_40_normal || 0) + (b.qty_40_dg || 0)
-        return hasNonReefer === 0 && (b.qty_40_reefer || 0) > 0
-      }
       // 부킹행은 proforma_etd 오름차순이므로 주차 순서로 삽입
       // 매 주차에 대해: 해당 주차 부킹 먼저 (리퍼 전용 제외), 없으면 BLANK SAILING
       for (let wn = wFrom; wn <= wTo; wn++) {
@@ -1178,7 +1214,19 @@ export default function BookingTable({
   // ── 편집 모드 토글: OFF 시 일괄 저장 ──────────────────────────────
 
   const handleToggleEditMode = async () => {
-    if (!editMode) { setEditMode(true); return }
+    if (!editMode) {
+      // 스크롤 위치 기억 → 편집 모드 ON 후 복원
+      const scrollTop = tableWrapperRef.current?.scrollTop ?? 0
+      const scrollLeft = tableWrapperRef.current?.scrollLeft ?? 0
+      setEditMode(true)
+      requestAnimationFrame(() => {
+        if (tableWrapperRef.current) {
+          tableWrapperRef.current.scrollTop = scrollTop
+          tableWrapperRef.current.scrollLeft = scrollLeft
+        }
+      })
+      return
+    }
     const editEntries = Object.entries(rowEdits)
     const hasChanges = editEntries.length > 0 || newRows.length > 0
     if (!hasChanges) { setEditMode(false); return }
@@ -1363,6 +1411,8 @@ export default function BookingTable({
   }
 
   const handleCopyRow = (booking: Booking) => {
+    const scrollTop = tableWrapperRef.current?.scrollTop ?? 0
+    const scrollLeft = tableWrapperRef.current?.scrollLeft ?? 0
     if (!editMode) setEditMode(true)
     const tempId = `new-${Date.now()}`
     setNewRows(prev => [{
@@ -1393,6 +1443,13 @@ export default function BookingTable({
         ? booking.booking_entries.map(e => ({ ...e, no: '' }))
         : [{ no: '', ctr_type: '20', ctr_qty: 1 }],
     }, ...prev])
+    // 스크롤 위치 복원
+    requestAnimationFrame(() => {
+      if (tableWrapperRef.current) {
+        tableWrapperRef.current.scrollTop = scrollTop
+        tableWrapperRef.current.scrollLeft = scrollLeft
+      }
+    })
   }
 
   const handleDelete = (id: string) => {
@@ -1914,6 +1971,11 @@ export default function BookingTable({
               className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${monthView ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
               월별
             </button>
+            <button onClick={() => setReeferSeparate(!reeferSeparate)}
+              title="도착지 내 RF 컨테이너 유무로 상단(비RF)/하단(RF) 분리"
+              className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${reeferSeparate ? 'bg-cyan-100 text-cyan-800 border border-cyan-400' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+              RF분리
+            </button>
             <div className="flex items-center gap-1">
               <button onClick={() => setBlankSailingMode(!blankSailingMode)}
                 title="목적지별 주차에 부킹 없는 경우 BLANK SAILING 행 표시 (정렬: 도착지→ETD)"
@@ -2037,7 +2099,8 @@ export default function BookingTable({
       )}
 
       {/* 테이블 */}
-      <div className={`flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-300 shadow-sm${isDragSelecting ? ' is-drag-selecting' : ''}`}
+      <div ref={tableWrapperRef}
+        className={`flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-300 shadow-sm${isDragSelecting ? ' is-drag-selecting' : ''}`}
         onMouseUp={() => { isMouseSelecting.current = false; setIsDragSelecting(false) }}
         onMouseLeave={() => { isMouseSelecting.current = false; setIsDragSelecting(false) }}
         onDoubleClick={() => { if (!editMode) handleToggleEditMode() }}
