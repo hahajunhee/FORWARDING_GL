@@ -1122,12 +1122,32 @@ export default function BookingTable({
       const bookings = destBookings[dest]
       const existing = destWeeks[dest]
       const meta = destMeta[dest] || { discharge_port: '', carrier: '' }
+      // 리퍼 전용 행 판별: 컨테이너가 40RF/리퍼만 있으면 true
+      const isReeferOnly = (b: Booking): boolean => {
+        if (b.booking_entries && b.booking_entries.length > 0) {
+          return b.booking_entries.every(e => /rf|reefer|리퍼/i.test(e.ctr_type))
+        }
+        // 구식 필드: 40리퍼만 있고 나머지 전부 0
+        const hasNonReefer = (b.qty_20_normal || 0) + (b.qty_20_dg || 0) + (b.qty_20_reefer || 0)
+          + (b.qty_40_normal || 0) + (b.qty_40_dg || 0)
+        return hasNonReefer === 0 && (b.qty_40_reefer || 0) > 0
+      }
       // 부킹행은 proforma_etd 오름차순이므로 주차 순서로 삽입
-      // 매 주차에 대해: 해당 주차 부킹 먼저, 없으면 BLANK SAILING
+      // 매 주차에 대해: 해당 주차 부킹 먼저 (리퍼 전용 제외), 없으면 BLANK SAILING
       for (let wn = wFrom; wn <= wTo; wn++) {
         const weekBookings = bookings.filter(b => getWeekNum(b.proforma_etd) === wn)
-        if (weekBookings.length > 0) {
+        const nonReeferBookings = weekBookings.filter(b => !isReeferOnly(b))
+        // 리퍼 전용이 아닌 부킹이 있으면 BLANK 아님 — 전체 weekBookings 표시
+        if (nonReeferBookings.length > 0) {
           result.push(...weekBookings)
+        } else if (weekBookings.length > 0) {
+          // 리퍼 전용 부킹만 있음 → BLANK SAILING + 리퍼 부킹도 표시
+          result.push(...weekBookings)
+          result.push({
+            _blankSailing: true, id: `blank-${dest}-${wn}`,
+            final_destination: dest, discharge_port: meta.discharge_port, carrier: meta.carrier,
+            weekNum: wn,
+          })
         } else {
           result.push({
             _blankSailing: true, id: `blank-${dest}-${wn}`,
@@ -1462,16 +1482,17 @@ export default function BookingTable({
 
   // ── 행 렌더링 ─────────────────────────────────────────────────────
 
-  function isSameGroup(a: Booking, b: Booking): boolean {
-    return (a.final_destination || '') === (b.final_destination || '')
+  function getRowDest(r: DisplayRow | null | undefined): string {
+    if (!r) return ''
+    return ('_blankSailing' in r ? r.final_destination : r.final_destination) || ''
   }
 
   function renderDataRow(
     booking: Booking,
     rowSpans: Record<string, { span: number; skip: boolean }>,
     rowIdx: number,
-    prevBooking?: Booking | null,
-    nextBooking?: Booking | null,
+    prevRow?: DisplayRow | null,
+    nextRow?: DisplayRow | null,
   ) {
     const edits = rowEdits[booking.id] || {}
     const merged: Partial<Booking> = { ...booking, ...edits }
@@ -1480,8 +1501,9 @@ export default function BookingTable({
     const handlerColor = destinationColorMap[booking.final_destination || ''] || ''
     const isOwnBooking = booking.forwarder_handler_id === currentUserId
 
-    const isGroupStart = !prevBooking || !isSameGroup(booking, prevBooking)
-    const isGroupEnd = !nextBooking || !isSameGroup(booking, nextBooking)
+    const myDest = booking.final_destination || ''
+    const isGroupStart = !prevRow || getRowDest(prevRow) !== myDest
+    const isGroupEnd = !nextRow || getRowDest(nextRow) !== myDest
     const groupBorder = `${tableStyle.groupBorderWidth}px solid ${tableStyle.groupBorderColor}`
     const colBorder = `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`
     const isSelected = selectedRows.has(booking.id)
@@ -1644,33 +1666,61 @@ export default function BookingTable({
     )
   }
 
-  function renderBlankSailingRow(row: BlankSailingRow, rowIdx: number, rowSpans: Record<string, SpanInfo>) {
+  function renderBlankSailingRow(row: BlankSailingRow, rowIdx: number, rowSpans: Record<string, SpanInfo>, prevRow?: DisplayRow | null, nextRow?: DisplayRow | null) {
     const colBorder = `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`
+    const groupBorder = `${tableStyle.groupBorderWidth}px solid ${tableStyle.groupBorderColor}`
     const manageOffset = editMode ? MANAGE_COL_W : 0
+    const handlerColor = destinationColorMap[row.final_destination || ''] || ''
+
+    // 그룹 경계 판단 (DisplayRow 기반)
+    const getFd = (r: DisplayRow | null | undefined) => r ? ('_blankSailing' in r ? r.final_destination : r.final_destination) || '' : ''
+    const isGroupStart = !prevRow || getFd(prevRow) !== (row.final_destination || '')
+    const isGroupEnd = !nextRow || getFd(nextRow) !== (row.final_destination || '')
+
     return (
-      <tr key={row.id} className="bg-amber-50">
-        <td className="table-td w-9 sticky left-0 z-10" style={{ backgroundColor: '#fffbeb', border: colBorder }} />
-        {editMode && <td className="table-td sticky z-10" style={{ left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: '#fffbeb', border: colBorder }} />}
+      <tr key={row.id}>
+        <td className="table-td w-9 sticky left-0 z-10" style={{
+          backgroundColor: '#fffbeb',
+          borderRight: colBorder,
+          borderTop: isGroupStart ? groupBorder : colBorder,
+          borderBottom: isGroupEnd ? groupBorder : 'none',
+        }} />
+        {editMode && <td className="table-td sticky z-10" style={{
+          left: 36, width: MANAGE_COL_W, minWidth: MANAGE_COL_W, backgroundColor: '#fffbeb',
+          borderTop: isGroupStart ? groupBorder : colBorder,
+          borderBottom: isGroupEnd ? groupBorder : 'none',
+          borderLeft: colBorder, borderRight: colBorder,
+        }} />}
         {colsToRender.map((col, colIdx) => {
           const def = allColDefs[col]
           if (!def) return null
 
-          // 병합 처리
           const isMergeCol = MERGE_HIERARCHY.includes(col as typeof MERGE_HIERARCHY[number])
           const spanInfo = isMergeCol ? (rowSpans[col] ?? { span: 1, skip: false }) : { span: 1, skip: false }
           if (spanInfo.skip) return null
           const rowSpan = spanInfo.span > 1 ? spanInfo.span : undefined
+          const isMergedSpan = spanInfo.span > 1
 
           const isPinned = pinnedColumns.includes(col)
           const fixedLeft = getFixedLeft(col, pinnedColumns, allColDefs, colWidths, manageOffset)
           const isCellSel = isCellInRange(rowIdx, colIdx)
-          const noTint = col === 'final_destination' || col === 'discharge_port' || col === 'carrier'
+          const noTint = isMergeCol // 최종도착지/양하항/선사 = 음영 없음
+          const tdIsGroupStart = isMergedSpan ? true : isGroupStart
+          const tdIsGroupEnd = isMergedSpan ? true : isGroupEnd
+
           let content: React.ReactNode = null
           if (col === 'vessel_name') content = <span className="text-amber-800 font-bold text-xs tracking-wider">⚓ BLANK SAILING</span>
           else if (col === 'week_no') content = <span className="text-xs text-amber-700 font-medium">{getWeekLabel(row.weekNum)}</span>
           else if (col === 'final_destination') content = <span className="text-xs">{row.final_destination || '-'}</span>
           else if (col === 'discharge_port') content = <span className="text-xs">{row.discharge_port || '-'}</span>
           else if (col === 'carrier') content = row.carrier ? <span className="inline-block bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs font-medium">{row.carrier}</span> : null
+
+          // 병합 셀 배경색: handlerColor 사용 (도착지 그룹 색상 유지), 비병합 merge열은 white
+          const bgColor = isCellSel ? '#dbeafe'
+            : isMergedSpan ? (handlerColor || 'white')
+            : noTint ? 'white'
+            : isPinned ? '#fffbeb' : undefined
+
           return (
             <td key={col}
               rowSpan={rowSpan}
@@ -1686,16 +1736,23 @@ export default function BookingTable({
               style={{
                 minWidth: colWidths[col] || def.minW,
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
-                backgroundColor: isCellSel ? '#dbeafe' : noTint ? 'white' : (isPinned ? '#fffbeb' : undefined),
-                border: colBorder,
+                backgroundColor: bgColor,
+                borderTop: tdIsGroupStart ? groupBorder : ((isMergeCol && mergeEnabled && !editMode) ? '1px solid transparent' : colBorder),
+                borderBottom: tdIsGroupEnd ? groupBorder : ((isMergeCol && mergeEnabled && !editMode) ? '1px solid transparent' : 'none'),
+                borderLeft: isCellSel ? '1px solid #93c5fd' : colBorder,
+                borderRight: isCellSel ? '1px solid #93c5fd' : colBorder,
                 userSelect: 'none',
-                ...(spanInfo.span > 1 ? { verticalAlign: 'middle' } : {}),
+                ...(isMergedSpan ? { verticalAlign: 'middle' } : {}),
               }}>
               {content}
             </td>
           )
         })}
-        {!editMode && <td className="table-td" style={{ border: colBorder }} />}
+        {!editMode && <td className="table-td" style={{
+          borderTop: isGroupStart ? groupBorder : colBorder,
+          borderBottom: isGroupEnd ? groupBorder : 'none',
+          borderLeft: colBorder, borderRight: colBorder,
+        }} />}
       </tr>
     )
   }
@@ -1709,13 +1766,9 @@ export default function BookingTable({
       return rows.map((r, i) => {
         const rowSpans: Record<string, SpanInfo> = {}
         for (const col of MERGE_HIERARCHY) rowSpans[col] = spanMaps[col][i]
-        if ('_blankSailing' in r) return renderBlankSailingRow(r as BlankSailingRow, baseRowIdx + i, rowSpans)
+        if ('_blankSailing' in r) return renderBlankSailingRow(r as BlankSailingRow, baseRowIdx + i, rowSpans, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null)
         const b = r as Booking
-        const prevRow = i > 0 ? rows[i - 1] : null
-        const nextRow = i < rows.length - 1 ? rows[i + 1] : null
-        const prevBk = prevRow && !('_blankSailing' in prevRow) ? prevRow as Booking : (i > 1 ? (() => { for (let j = i - 1; j >= 0; j--) { if (!('_blankSailing' in rows[j])) return rows[j] as Booking }; return null })() : null)
-        const nextBk = nextRow && !('_blankSailing' in nextRow) ? nextRow as Booking : (i < rows.length - 2 ? (() => { for (let j = i + 1; j < rows.length; j++) { if (!('_blankSailing' in rows[j])) return rows[j] as Booking }; return null })() : null)
-        return renderDataRow(b, rowSpans, baseRowIdx + i, prevBk, nextBk)
+        return renderDataRow(b, rowSpans, baseRowIdx + i, i > 0 ? rows[i - 1] : null, i < rows.length - 1 ? rows[i + 1] : null)
       })
     }
 
