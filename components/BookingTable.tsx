@@ -276,7 +276,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
       const bookingNos = (b.booking_entries && b.booking_entries.length > 0)
         ? b.booking_entries.map(e => e.no).join(' / ')
         : b.booking_no
-      const wn = getWeekNum(b.updated_etd || b.proforma_etd)
+      const wn = getWeekNum(b.proforma_etd)
       const base: Record<string, unknown> = {
         '부킹번호': bookingNos, '최종도착지': b.final_destination, '양하항': b.discharge_port,
         '담당선사': b.carrier, '모선명': b.vessel_name, '주차': wn !== null ? getWeekLabel(wn) : '',
@@ -607,7 +607,7 @@ function ViewCell({ colKey, booking, currentUserId, customColumns }: {
       )
     }
     case 'week_no': {
-      const wn = getWeekNum(booking.updated_etd || booking.proforma_etd)
+      const wn = getWeekNum(booking.proforma_etd)
       return wn !== null
         ? <span className="text-xs text-indigo-700 font-medium">{getWeekLabel(wn)}</span>
         : <span className="text-gray-300 text-xs">-</span>
@@ -750,6 +750,8 @@ export default function BookingTable({
   const [monthView, _setMonthView] = useState(false)
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(new Set())
   const [blankSailingMode, _setBlankSailingMode] = useState(false)
+  const [blankWeekFrom, _setBlankWeekFrom] = useState(14)
+  const [blankWeekTo, _setBlankWeekTo] = useState(18)
 
   // ── 필터 상태 (localStorage 영속) ────────────────────────────────
   const [viewMode, _setViewMode] = useState<'all' | 'mine'>('all')
@@ -803,6 +805,8 @@ export default function BookingTable({
       if (localStorage.getItem('bk_monthView') === 'true') _setMonthView(true)
       if (localStorage.getItem('bk_mergeEnabled') === 'false') _setMergeEnabled(false)
       if (localStorage.getItem('bk_blankSailing') === 'true') _setBlankSailingMode(true)
+      const bwf = localStorage.getItem('bk_blankWeekFrom'); if (bwf) _setBlankWeekFrom(Number(bwf))
+      const bwt = localStorage.getItem('bk_blankWeekTo'); if (bwt) _setBlankWeekTo(Number(bwt))
       const storedSorts = localStorage.getItem('bk_sorts')
       if (storedSorts) _setSorts(JSON.parse(storedSorts))
       const storedWidths = localStorage.getItem('bk_col_widths')
@@ -834,7 +838,20 @@ export default function BookingTable({
   const setRegionFilter = (v: string) => { _setRegionFilter(v); ls('bk_regionFilter', v) }
   const setCustomersFilter = (v: string) => { _setCustomersFilter(v); ls('bk_customersFilter', v) }
   const setMergeEnabled = (v: boolean) => { _setMergeEnabled(v); ls('bk_mergeEnabled', String(v)) }
-  const setBlankSailingMode = (v: boolean) => { _setBlankSailingMode(v); ls('bk_blankSailing', String(v)) }
+  const setBlankSailingMode = (v: boolean) => {
+    _setBlankSailingMode(v)
+    ls('bk_blankSailing', String(v))
+    if (v) {
+      // BLANK 모드 ON → 정렬 강제: 최종도착지 asc → proforma_etd asc
+      const blankSorts: SortItem[] = [
+        { col: 'final_destination', dir: 'asc' },
+        { col: 'proforma_etd', dir: 'asc' },
+      ]
+      setSorts(blankSorts)
+    }
+  }
+  const setBlankWeekFrom = (v: number) => { _setBlankWeekFrom(v); ls('bk_blankWeekFrom', String(v)) }
+  const setBlankWeekTo = (v: number) => { _setBlankWeekTo(v); ls('bk_blankWeekTo', String(v)) }
   const setSorts = (updater: SortItem[] | ((p: SortItem[]) => SortItem[])) => {
     _setSorts(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
@@ -864,7 +881,7 @@ export default function BookingTable({
       case 'handler_region': return booking.forwarder_handler?.region || ''
       case 'handler_customers': return booking.forwarder_handler?.customers || ''
       case 'doc_cutoff_date': return fmtDate(booking.doc_cutoff_date)
-      case 'week_no': { const wn = getWeekNum(booking.updated_etd || booking.proforma_etd); return wn !== null ? getWeekLabel(wn) : '-' }
+      case 'week_no': { const wn = getWeekNum(booking.proforma_etd); return wn !== null ? getWeekLabel(wn) : '-' }
       case 'proforma_etd': return fmtDate(booking.proforma_etd)
       case 'updated_etd': return fmtDate(booking.updated_etd)
       case 'eta': return fmtDate(booking.eta)
@@ -1072,37 +1089,47 @@ export default function BookingTable({
   // ── BLANK SAILING 가상행 삽입 ────────────────────────────────────
   const displayRows: DisplayRow[] = useMemo(() => {
     if (!blankSailingMode) return processed
-    // 목적지별 주차 수집
+    const wFrom = blankWeekFrom
+    const wTo = blankWeekTo
+    if (wFrom > wTo) return processed
+
+    // 목적지별 주차 수집 (processed는 이미 정렬됨: 도착지→proforma_etd asc)
     const destWeeks: Record<string, Set<number>> = {}
     const destBookings: Record<string, Booking[]> = {}
     const destOrder: string[] = []
     for (const b of processed) {
       const dest = b.final_destination || ''
       if (!destWeeks[dest]) { destWeeks[dest] = new Set(); destBookings[dest] = []; destOrder.push(dest) }
-      const wn = getWeekNum(b.updated_etd || b.proforma_etd)
+      const wn = getWeekNum(b.proforma_etd)
       if (wn !== null) destWeeks[dest].add(wn)
       destBookings[dest].push(b)
     }
-    let globalMin = Infinity, globalMax = -Infinity
-    for (const ws of Object.values(destWeeks)) {
-      for (const wn of ws) {
-        if (wn < globalMin) globalMin = wn
-        if (wn > globalMax) globalMax = wn
-      }
-    }
-    if (globalMin === Infinity) return processed
+
+    // 주차 범위 내에서 빈 주차를 각 도착지별로 삽입
     const result: DisplayRow[] = []
     for (const dest of destOrder) {
-      result.push(...destBookings[dest])
+      const bookings = destBookings[dest]
       const existing = destWeeks[dest]
-      for (let wn = globalMin; wn <= globalMax; wn++) {
-        if (!existing.has(wn)) {
+      // 부킹행은 proforma_etd 오름차순이므로 주차 순서로 삽입
+      // 매 주차에 대해: 해당 주차 부킹 먼저, 없으면 BLANK SAILING
+      for (let wn = wFrom; wn <= wTo; wn++) {
+        // 이 주차에 해당하는 부킹 추출
+        const weekBookings = bookings.filter(b => getWeekNum(b.proforma_etd) === wn)
+        if (weekBookings.length > 0) {
+          result.push(...weekBookings)
+        } else {
           result.push({ _blankSailing: true, id: `blank-${dest}-${wn}`, final_destination: dest, weekNum: wn })
         }
       }
+      // 주차 범위 밖 부킹도 끝에 추가
+      const outsideBookings = bookings.filter(b => {
+        const wn = getWeekNum(b.proforma_etd)
+        return wn === null || wn < wFrom || wn > wTo
+      })
+      if (outsideBookings.length > 0) result.push(...outsideBookings)
     }
     return result
-  }, [processed, blankSailingMode])
+  }, [processed, blankSailingMode, blankWeekFrom, blankWeekTo])
 
   // visualOrderRef: 화면에 실제 렌더되는 행 순서를 추적 (monthView 재정렬 대응)
   useEffect(() => {
@@ -1808,11 +1835,25 @@ export default function BookingTable({
               className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${monthView ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
               월별
             </button>
-            <button onClick={() => setBlankSailingMode(!blankSailingMode)}
-              title="목적지별 주차에 부킹 없는 경우 BLANK SAILING 행 표시"
-              className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${blankSailingMode ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-              ⚓ BLANK
-            </button>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setBlankSailingMode(!blankSailingMode)}
+                title="목적지별 주차에 부킹 없는 경우 BLANK SAILING 행 표시 (정렬: 도착지→ETD)"
+                className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${blankSailingMode ? 'bg-amber-200 text-amber-900 border border-amber-400' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                ⚓ BLANK
+              </button>
+              {blankSailingMode && (
+                <div className="flex items-center gap-0.5 text-xs">
+                  <input type="number" min={1} max={53} value={blankWeekFrom}
+                    onChange={e => setBlankWeekFrom(Math.max(1, Number(e.target.value)))}
+                    className="w-12 text-center border border-amber-300 rounded px-1 py-1 text-xs bg-amber-50 focus:ring-1 focus:ring-amber-400 focus:outline-none" />
+                  <span className="text-gray-400">~</span>
+                  <input type="number" min={1} max={53} value={blankWeekTo}
+                    onChange={e => setBlankWeekTo(Math.max(1, Number(e.target.value)))}
+                    className="w-12 text-center border border-amber-300 rounded px-1 py-1 text-xs bg-amber-50 focus:ring-1 focus:ring-amber-400 focus:outline-none" />
+                  <span className="text-gray-500">주차</span>
+                </div>
+              )}
+            </div>
             <button onClick={() => exportInlandTransport(processed)} disabled={processed.length === 0}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 text-white text-sm rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
