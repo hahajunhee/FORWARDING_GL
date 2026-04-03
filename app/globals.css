@@ -65,12 +65,20 @@
   @apply text-gray-400;
 }
 
-/* 테이블 행 호버 효과 */
+/* 테이블 행 호버 효과 (sticky/pinned 셀도 포함하기 위해 !important 사용) */
 table tbody tr:hover td {
-  background-color: #f0f7ff;
+  background-color: #f0f7ff !important;
 }
 
-/* 드래그 범위 선택 중: hover 억제 (단, 선택된 셀의 inline style은 그대로 유지) */
+/* 드래그 범위 선택 중: hover 억제 */
 .is-drag-selecting table tbody tr:hover td {
-  background-color: unset;
+  background-color: unset !important;
+}
+
+/* 드래그 범위 선택된 셀 — hover보다 우선 */
+table tbody tr td[data-cell-sel="true"] {
+  background-color: #dbeafe !important;
+}
+table tbody tr td[data-cell-sel-pinned="true"] {
+  background-color: #bfdbfe !important;
 }

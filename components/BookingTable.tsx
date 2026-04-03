@@ -809,6 +809,9 @@ export default function BookingTable({
   cellSelEndRef.current = cellSelEnd
   const isMouseSelecting = useRef(false)
   const [isDragSelecting, setIsDragSelecting] = useState(false)
+  const [copyWithHeaders, _setCopyWithHeaders] = useState(false)
+  const copyWithHeadersRef = useRef(false)
+  const setCopyWithHeaders = (v: boolean) => { _setCopyWithHeaders(v); copyWithHeadersRef.current = v }
   const processedRef = useRef<Booking[]>([])
   const visualOrderRef = useRef<DisplayRow[]>([])
   const allColDefsRef = useRef(allColDefs)
@@ -1036,6 +1039,17 @@ export default function BookingTable({
       const minC = Math.min(start.colIdx, end.colIdx)
       const maxC = Math.max(start.colIdx, end.colIdx)
       const rows: string[][] = []
+      // 열제목 포함 복사
+      if (copyWithHeadersRef.current) {
+        const headerRow: string[] = []
+        const defs = allColDefsRef.current
+        for (let c = minC; c <= maxC; c++) {
+          const col = cols[c]
+          if (!col) continue
+          headerRow.push(defs[col]?.label || col)
+        }
+        rows.push(headerRow)
+      }
       for (let r = minR; r <= maxR; r++) {
         const bk = visualOrderRef.current[r]
         if (!bk) continue
@@ -1059,9 +1073,12 @@ export default function BookingTable({
       }
       if (rows.length === 0) return
       const tsv = rows.map(r => r.join('\t')).join('\n')
-      const htmlRows = rows.map(r =>
-        '<tr>' + r.map(v => `<td style="padding:2px 6px;">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</td>`).join('') + '</tr>'
-      ).join('')
+      const htmlRows = rows.map((r, ri) => {
+        const isHeader = copyWithHeadersRef.current && ri === 0
+        const tag = isHeader ? 'th' : 'td'
+        const style = isHeader ? 'padding:2px 6px;font-weight:bold;background:#f3f4f6;border:1px solid #d1d5db;' : 'padding:2px 6px;border:1px solid #e5e7eb;'
+        return '<tr>' + r.map(v => `<${tag} style="${style}">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</${tag}>`).join('') + '</tr>'
+      }).join('')
       const html = `<table style="font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10pt;border-collapse:collapse;">${htmlRows}</table>`
       // ClipboardItem 지원 브라우저: text + html 동시 복사
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
@@ -1684,8 +1701,9 @@ export default function BookingTable({
                 ? () => setActiveCell({ id: booking.id, col })
                 : undefined
               }
+              {...(isCellSel ? (isPinned ? { 'data-cell-sel-pinned': 'true' } : { 'data-cell-sel': 'true' }) : {})}
               className={`table-td text-xs
-                ${isPinned ? 'sticky z-10 bg-white' : ''}
+                ${isPinned ? 'sticky z-10' : ''}
                 ${dragOver === col && dragSrc !== col ? 'bg-blue-50' : ''}
                 ${canEditCell ? 'p-0.5 cursor-pointer' : ''}
                 ${editMode && !isOwnBooking && col !== 'forwarder_handler' ? 'opacity-60' : ''}
@@ -1693,8 +1711,7 @@ export default function BookingTable({
               style={{
                 minWidth: colWidths[col] || def.minW,
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
-                ...(isPinned ? { backgroundColor: isCellSel ? '#bfdbfe' : (handlerColor || 'white') } : {}),
-                ...(isCellSel && !isPinned ? { backgroundColor: '#dbeafe' } : {}),
+                ...(isPinned ? { backgroundColor: handlerColor || 'white' } : {}),
                 borderTop: isActive ? '2px solid #ef4444' : tdIsGroupStart ? groupBorder : ((isMergeCol && mergeEnabled && !editMode) ? '1px solid transparent' : colBorder),
                 borderBottom: isActive ? '2px solid #ef4444' : tdIsGroupEnd ? groupBorder : ((isMergeCol && mergeEnabled && !editMode) ? '1px solid transparent' : 'none'),
                 borderLeft: isActive ? '2px solid #ef4444' : isCellSel ? '1px solid #93c5fd' : colBorder,
@@ -1788,15 +1805,15 @@ export default function BookingTable({
             content = row.carrier ? <span className="inline-block px-2 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: cColor || '#f3f4f6', color: '#1f2937' }}>{row.carrier}</span> : null
           }
 
-          // 병합 셀 배경색: handlerColor 사용 (도착지 그룹 색상 유지), 비병합 merge열은 white
-          const bgColor = isCellSel ? '#dbeafe'
-            : isMergedSpan ? (handlerColor || 'white')
+          // bgColor: isCellSel은 CSS data-attr 방식으로 처리
+          const bgColorFinal = isMergedSpan ? (handlerColor || 'white')
             : noTint ? 'white'
             : isPinned ? '#fffbeb' : undefined
 
           return (
             <td key={col}
               rowSpan={rowSpan}
+              {...(isCellSel ? (isPinned ? { 'data-cell-sel-pinned': 'true' } : { 'data-cell-sel': 'true' }) : {})}
               onMouseDown={e => {
                 if (e.button !== 0) return
                 isMouseSelecting.current = true
@@ -1809,7 +1826,7 @@ export default function BookingTable({
               style={{
                 minWidth: colWidths[col] || def.minW,
                 ...(fixedLeft !== null ? { left: fixedLeft } : {}),
-                backgroundColor: bgColor,
+                backgroundColor: bgColorFinal,
                 borderTop: tdIsGroupStart ? groupBorder : ((isMergeCol && mergeEnabled && !editMode) ? '1px solid transparent' : colBorder),
                 borderBottom: tdIsGroupEnd ? groupBorder : ((isMergeCol && mergeEnabled && !editMode) ? '1px solid transparent' : 'none'),
                 borderLeft: isCellSel ? '1px solid #93c5fd' : colBorder,
@@ -2057,6 +2074,12 @@ export default function BookingTable({
             className="text-xs px-2 py-0.5 bg-gray-100 text-gray-400 border border-gray-200 rounded hover:bg-gray-200 transition-colors">
             열 너비 초기화
           </button>
+          <label className={`flex items-center gap-1 text-xs px-2 py-0.5 border rounded cursor-pointer transition-colors ${copyWithHeaders ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+            title="드래그 복사 시 열 제목 포함">
+            <input type="checkbox" checked={copyWithHeaders} onChange={e => setCopyWithHeaders(e.target.checked)}
+              className="rounded w-3 h-3" />
+            열제목 복사
+          </label>
         </div>
         {editMode && <span className="text-blue-500 font-medium ml-2">✎ 편집 모드 — 편집 OFF 시 일괄 저장</span>}
       </div>
