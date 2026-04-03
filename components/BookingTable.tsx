@@ -1646,7 +1646,6 @@ export default function BookingTable({
           let content: React.ReactNode = null
           if (col === 'vessel_name') content = <span className="text-amber-800 font-bold text-xs tracking-wider">⚓ BLANK SAILING</span>
           else if (col === 'week_no') content = <span className="text-xs text-amber-700 font-medium">{getWeekLabel(row.weekNum)}</span>
-          else if (col === 'final_destination') content = <span className="text-xs text-gray-500">{row.final_destination}</span>
           return (
             <td key={col}
               onMouseDown={e => {
