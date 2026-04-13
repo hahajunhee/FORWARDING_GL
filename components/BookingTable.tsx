@@ -742,6 +742,9 @@ export default function BookingTable({
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkEditOpen, setBulkEditOpen] = useState(false)
+  const [bulkEditCol, setBulkEditCol] = useState('')
+  const [bulkEditVal, setBulkEditVal] = useState('')
   const [colWidths, setColWidths] = useState<Record<string, number>>({})
   const resizingRef = useRef<{ col: string; startX: number; startW: number } | null>(null)
 
@@ -955,6 +958,20 @@ export default function BookingTable({
     return rowIdx >= minR && rowIdx <= maxR && colIdx >= minC && colIdx <= maxC
   }
 
+  // 담당고객사 기반 편집 권한: 본인 담당이거나, 같은 고객사를 담당하는 경우 편집 가능
+  const myCustomerSet = useMemo(() => {
+    if (!currentProfile?.customers) return new Set<string>()
+    return new Set(currentProfile.customers.split(',').map(s => s.trim()).filter(Boolean))
+  }, [currentProfile?.customers])
+
+  function canManageBooking(booking: Booking): boolean {
+    if (booking.forwarder_handler_id === currentUserId) return true
+    if (myCustomerSet.size === 0) return false
+    const handlerCustomers = booking.forwarder_handler?.customers
+    if (!handlerCustomers) return false
+    const theirCustomers = handlerCustomers.split(',').map(s => s.trim()).filter(Boolean)
+    return theirCustomers.some(c => myCustomerSet.has(c))
+  }
 
   // 최종도착지별 행 배경색 맵
   const destinationColorMap = useMemo(() => {
@@ -1127,9 +1144,9 @@ export default function BookingTable({
           if (col === 'final_destination' && destOrderMap) {
             const ia = destOrderMap[va] ?? 9999
             const ib = destOrderMap[vb] ?? 9999
-            cmp = ia - ib
+            cmp = ia !== ib ? ia - ib : va.localeCompare(vb)
           } else {
-            cmp = va < vb ? -1 : va > vb ? 1 : 0
+            cmp = va.localeCompare(vb)
           }
           if (cmp !== 0) return dir === 'asc' ? cmp : -cmp
         }
@@ -1150,7 +1167,7 @@ export default function BookingTable({
             const ia = destOrderMap[da] ?? 9999, ib = destOrderMap[db] ?? 9999
             if (ia !== ib) return ia - ib
           }
-          return da < db ? -1 : 1
+          return da.localeCompare(db)
         }
         // 2) RF 없음 = 0 (상단), RF 있음 = 1 (하단)
         const ra = hasReeferContainer(a) ? 1 : 0
@@ -1377,6 +1394,7 @@ export default function BookingTable({
       case 'secured_space': return { secured_space: v }
       case 'mqc': return { mqc: v }
       case 'customer_doc_handler': return { customer_doc_handler: v }
+      case 'forwarder_handler': return { forwarder_handler_id: v } as Partial<Booking>
       case 'doc_cutoff_date': return { doc_cutoff_date: dateVal }
       case 'proforma_etd': return { proforma_etd: dateVal }
       case 'updated_etd': return { updated_etd: dateVal }
@@ -1407,7 +1425,7 @@ export default function BookingTable({
       const bookingRaw = visualOrderRef.current[startRow + ri]
       if (!bookingRaw || '_blankSailing' in bookingRaw) continue
       const booking = bookingRaw as Booking
-      if (booking.forwarder_handler_id !== currentUserId && !pasteRows[ri].some((_, ci) => colsToRender[startCol + ci] === 'forwarder_handler')) continue
+      if (!canManageBooking(booking) && !pasteRows[ri].some((_, ci) => colsToRender[startCol + ci] === 'forwarder_handler')) continue
       const changes: Partial<Booking> = {}
       for (let ci = 0; ci < pasteRows[ri].length; ci++) {
         const col = colsToRender[startCol + ci]
@@ -1513,10 +1531,10 @@ export default function BookingTable({
 
   const handleBulkDelete = async () => {
     if (selectedRows.size === 0) return
-    // 내 담당 건만 삭제 가능
+    // 내 담당(또는 같은 고객사) 건만 삭제 가능
     const ownedIds = Array.from(selectedRows).filter(id => {
       const b = bookings.find(bk => bk.id === id)
-      return b?.forwarder_handler_id === currentUserId
+      return b ? canManageBooking(b) : false
     })
     if (ownedIds.length === 0) {
       alert('내 담당 건만 삭제할 수 있습니다. 타인 담당 건은 포워더 담당자를 변경한 후 삭제해주세요.')
@@ -1531,6 +1549,30 @@ export default function BookingTable({
     } finally {
       setBulkDeleting(false)
     }
+  }
+
+  const handleBulkEdit = () => {
+    if (selectedRows.size === 0 || !bulkEditCol) return
+    const editableIds = Array.from(selectedRows).filter(id => {
+      const b = bookings.find(bk => bk.id === id)
+      return b ? canManageBooking(b) : false
+    })
+    if (editableIds.length === 0) { alert('편집 가능한 행이 없습니다.'); return }
+    const batchEdits: Record<string, Partial<Booking>> = {}
+    for (const id of editableIds) {
+      const change = textToCellChange(bulkEditCol, bulkEditVal)
+      if (change) batchEdits[id] = change
+    }
+    setRowEdits(prev => {
+      const next = { ...prev }
+      for (const [id, changes] of Object.entries(batchEdits)) {
+        next[id] = { ...(next[id] || {}), ...changes }
+      }
+      return next
+    })
+    setBulkEditOpen(false)
+    setBulkEditVal('')
+    if (!editMode) setEditMode(true)
   }
 
   const handleResizeStart = (col: string, e: React.MouseEvent) => {
@@ -1596,7 +1638,7 @@ export default function BookingTable({
     const hasEdits = Object.keys(edits).length > 0
     const err = rowErrors[booking.id]
     const handlerColor = destinationColorMap[booking.final_destination || ''] || ''
-    const isOwnBooking = booking.forwarder_handler_id === currentUserId
+    const isOwnBooking = canManageBooking(booking)
 
     const myDest = booking.final_destination || ''
     const isGroupStart = !prevRow || getRowDest(prevRow) !== myDest
@@ -1690,8 +1732,12 @@ export default function BookingTable({
                 if (e.button !== 0) return
                 isMouseSelecting.current = true
                 setIsDragSelecting(true)
-                setCellSelStart({ rowIdx, colIdx })
-                setCellSelEnd({ rowIdx, colIdx })
+                if (e.shiftKey && cellSelStart) {
+                  setCellSelEnd({ rowIdx, colIdx })
+                } else {
+                  setCellSelStart({ rowIdx, colIdx })
+                  setCellSelEnd({ rowIdx, colIdx })
+                }
               }}
               onMouseEnter={() => {
                 if (!isMouseSelecting.current) return
@@ -1818,8 +1864,12 @@ export default function BookingTable({
                 if (e.button !== 0) return
                 isMouseSelecting.current = true
                 setIsDragSelecting(true)
-                setCellSelStart({ rowIdx, colIdx })
-                setCellSelEnd({ rowIdx, colIdx })
+                if (e.shiftKey && cellSelStart) {
+                  setCellSelEnd({ rowIdx, colIdx })
+                } else {
+                  setCellSelStart({ rowIdx, colIdx })
+                  setCellSelEnd({ rowIdx, colIdx })
+                }
               }}
               onMouseEnter={() => { if (!isMouseSelecting.current) return; setCellSelEnd({ rowIdx, colIdx }) }}
               className={`table-td text-xs ${isPinned ? 'sticky z-10' : ''}`}
@@ -1981,10 +2031,16 @@ export default function BookingTable({
           )}
           <div className="ml-auto flex items-center gap-2">
             {selectedRows.size > 0 && (
-              <button onClick={handleBulkDelete} disabled={bulkDeleting}
-                className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors font-medium">
-                {bulkDeleting ? '삭제 중...' : `선택 삭제 (${selectedRows.size})`}
-              </button>
+              <>
+                <button onClick={() => setBulkEditOpen(!bulkEditOpen)}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                  일괄편집 ({selectedRows.size})
+                </button>
+                <button onClick={handleBulkDelete} disabled={bulkDeleting}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors font-medium">
+                  {bulkDeleting ? '삭제 중...' : `선택 삭제 (${selectedRows.size})`}
+                </button>
+              </>
             )}
             <span className="text-xs text-gray-400">{processed.length}건</span>
             <button onClick={handleToggleEditMode} disabled={bulkSaving}
@@ -2132,6 +2188,62 @@ export default function BookingTable({
               행 추가 버튼을 눌러 새 부킹을 입력하세요.
             </div>
           )}
+        </div>
+      )}
+
+      {/* 일괄편집 패널 */}
+      {bulkEditOpen && selectedRows.size > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-medium text-blue-800">{selectedRows.size}건 일괄편집</span>
+          <select value={bulkEditCol} onChange={e => setBulkEditCol(e.target.value)}
+            className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none">
+            <option value="">변경할 열 선택</option>
+            {colsToRender.filter(c => c !== 'week_no' && c !== 'handler_region' && c !== 'handler_customers' && c !== 'final_qty').map(c => (
+              <option key={c} value={c}>{allColDefs[c]?.label || c}</option>
+            ))}
+          </select>
+          {bulkEditCol && (
+            bulkEditCol === 'forwarder_handler' ? (
+              <select value={bulkEditVal} onChange={e => setBulkEditVal(e.target.value)}
+                className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none">
+                <option value="">담당자 선택</option>
+                {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            ) : bulkEditCol === 'carrier' ? (
+              <select value={bulkEditVal} onChange={e => setBulkEditVal(e.target.value)}
+                className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none">
+                <option value="">선사 선택</option>
+                {carriers.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            ) : bulkEditCol === 'final_destination' ? (
+              <select value={bulkEditVal} onChange={e => setBulkEditVal(e.target.value)}
+                className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none">
+                <option value="">도착지 선택</option>
+                {destinations.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            ) : bulkEditCol === 'discharge_port' ? (
+              <select value={bulkEditVal} onChange={e => setBulkEditVal(e.target.value)}
+                className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none">
+                <option value="">양하항 선택</option>
+                {ports.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            ) : ['doc_cutoff_date', 'proforma_etd', 'updated_etd', 'eta'].includes(bulkEditCol) ? (
+              <input type="date" value={bulkEditVal} onChange={e => setBulkEditVal(e.target.value)}
+                className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none" />
+            ) : (
+              <input type="text" value={bulkEditVal} onChange={e => setBulkEditVal(e.target.value)}
+                placeholder="변경할 값 입력" onKeyDown={e => e.key === 'Enter' && handleBulkEdit()}
+                className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none min-w-[120px]" />
+            )
+          )}
+          <button onClick={handleBulkEdit} disabled={!bulkEditCol}
+            className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 transition-colors font-medium">
+            적용
+          </button>
+          <button onClick={() => setBulkEditOpen(false)}
+            className="text-xs px-2 py-1 text-gray-500 hover:text-gray-700">
+            닫기
+          </button>
         </div>
       )}
 

@@ -26,11 +26,12 @@ function fmtDate(d: string | null | undefined): string {
 
 // 단일 부킹 요약 문자열
 function bookingLine(b: Booking): string {
-  const etd = fmtDate(b.updated_etd || b.proforma_etd)
+  const etd = fmtDate(b.proforma_etd)
   const nos = (b.booking_entries && b.booking_entries.length > 0)
-    ? b.booking_entries.map(e => e.no).join(' / ')
-    : b.booking_no
-  return `부킹번호: ${nos} / 선사: ${b.carrier || '-'} / 모선명: ${b.vessel_name || '-'} / ETD: ${etd}`
+    ? b.booking_entries.map(e => e.no).join(', ')
+    : b.booking_no || '-'
+  const containers = formatContainers(b)
+  return `${b.final_destination || '-'} / ${b.vessel_name || '-'} ${b.voyage || ''} / ${b.carrier || '-'} / (${nos}) / POD: ${b.discharge_port || '-'} / ETD: ${etd} // 수량: (${containers})`
 }
 
 function escapeRegex(s: string): string {
@@ -307,16 +308,26 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
                 {/* 포함 부킹 목록 */}
                 <div className="bg-gray-50 rounded-lg p-2.5 space-y-1">
                   {rows.map((b, i) => (
-                    <div key={b.id} className="flex items-center gap-2 text-xs">
-                      <span className="text-gray-400 w-4 flex-shrink-0">{i + 1}.</span>
-                      <span className="font-mono font-medium text-blue-700">
-                        {(b.booking_entries && b.booking_entries.length > 0)
-                          ? b.booking_entries.map(e => e.no).join(' / ')
-                          : b.booking_no}
-                      </span>
-                      <span className="text-gray-500">{b.carrier}</span>
-                      <span className="text-gray-400 truncate">{b.vessel_name}</span>
-                      <span className="ml-auto text-gray-500 whitespace-nowrap">ETD {fmtDate(b.updated_etd || b.proforma_etd)}</span>
+                    <div key={b.id} className="flex items-start gap-2 text-xs">
+                      <span className="text-gray-400 w-4 flex-shrink-0 pt-0.5">{i + 1}.</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-medium text-gray-800">{b.final_destination || '-'}</span>
+                          <span className="text-gray-400">/</span>
+                          <span className="text-gray-600">{b.vessel_name} {b.voyage}</span>
+                          <span className="text-gray-400">/</span>
+                          <span className="text-gray-500">{b.carrier}</span>
+                          <span className="text-gray-400">/</span>
+                          <span className="font-mono text-blue-700">
+                            ({(b.booking_entries && b.booking_entries.length > 0)
+                              ? b.booking_entries.map(e => e.no).join(', ')
+                              : b.booking_no})
+                          </span>
+                        </div>
+                        <div className="text-gray-400 mt-0.5">
+                          POD: {b.discharge_port || '-'} / ETD: {fmtDate(b.proforma_etd)} // 수량: ({formatContainers(b)})
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>

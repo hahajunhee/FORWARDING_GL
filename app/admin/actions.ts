@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase-server'
+import { createAdminClient } from '@/lib/supabase-admin'
 import { revalidatePath } from 'next/cache'
 
 const MASTER_EMAIL = 'hahajunhee@glovis.net'
@@ -16,7 +17,8 @@ export async function setUserActive(userId: string, isActive: boolean): Promise<
   const master = await getMasterUser()
   if (!master) return { error: '권한이 없습니다.' }
 
-  const { error } = await master.supabase
+  const admin = createAdminClient()
+  const { error } = await admin
     .from('profiles')
     .update({ is_active: isActive })
     .eq('id', userId)
@@ -31,8 +33,8 @@ export async function deleteUser(userId: string): Promise<{ error: string | null
   const master = await getMasterUser()
   if (!master) return { error: '권한이 없습니다.' }
 
-  // profiles 삭제 (auth.users는 service_role 없이는 삭제 불가 → 비활성화로 대체)
-  const { error } = await master.supabase
+  const admin = createAdminClient()
+  const { error } = await admin
     .from('profiles')
     .update({ is_active: false, name: '[탈퇴]' })
     .eq('id', userId)
