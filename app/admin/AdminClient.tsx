@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { setUserActive, deleteUser, updateInviteCode, updateRegionList, updateCustomerList } from './actions'
+import { setUserActive, deleteUser, restoreUser, updateInviteCode, updateRegionList, updateCustomerList } from './actions'
 import type { Profile } from '@/types'
 
 // ── 단순 목록 관리 컴포넌트 ─────────────────────────────────────────
@@ -97,6 +97,9 @@ export default function AdminClient({ profiles, currentInviteCode, regionList, c
   const [, startTransition] = useTransition()
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({})
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [reassignState, setReassignState] = useState<{ userId: string; bookingCount: number; targetId: string } | null>(null)
+  const [restoreConfirmId, setRestoreConfirmId] = useState<string | null>(null)
+  const [restoreName, setRestoreName] = useState('')
 
   const setError = (userId: string, msg: string | null) =>
     setActionErrors(prev => msg ? { ...prev, [userId]: msg } : Object.fromEntries(Object.entries(prev).filter(([k]) => k !== userId)))
@@ -112,8 +115,33 @@ export default function AdminClient({ profiles, currentInviteCode, regionList, c
   const handleDelete = (userId: string) => {
     startTransition(async () => {
       const result = await deleteUser(userId)
+      if (result.error) { setError(userId, result.error); return }
+      if (result.bookingCount && result.bookingCount > 0) {
+        // 부킹이 있으면 재배정 프롬프트
+        setReassignState({ userId, bookingCount: result.bookingCount, targetId: '' })
+        setDeleteConfirmId(null)
+        return
+      }
+      setError(userId, null); setDeleteConfirmId(null)
+    })
+  }
+
+  const handleReassignAndDelete = () => {
+    if (!reassignState || !reassignState.targetId) return
+    startTransition(async () => {
+      const result = await deleteUser(reassignState.userId, reassignState.targetId)
+      if (result.error) setError(reassignState.userId, result.error)
+      else setError(reassignState.userId, null)
+      setReassignState(null)
+    })
+  }
+
+  const handleRestore = (userId: string) => {
+    if (!restoreName.trim()) return
+    startTransition(async () => {
+      const result = await restoreUser(userId, restoreName.trim())
       if (result.error) setError(userId, result.error)
-      else { setError(userId, null); setDeleteConfirmId(null) }
+      else { setError(userId, null); setRestoreConfirmId(null); setRestoreName('') }
     })
   }
 
@@ -191,6 +219,7 @@ export default function AdminClient({ profiles, currentInviteCode, regionList, c
           <div className="divide-y divide-gray-100">
             {profiles.map(profile => {
               const isActive = profile.is_active !== false
+              const isDeleted = profile.name.startsWith('[탈퇴]')
               const err = actionErrors[profile.id]
               return (
                 <div key={profile.id} className={`px-5 py-3 ${!isActive ? 'bg-gray-50' : ''}`}>
@@ -210,31 +239,53 @@ export default function AdminClient({ profiles, currentInviteCode, regionList, c
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => handleToggleActive(profile.id, isActive)}
-                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors border ${
-                          isActive
-                            ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200'
-                            : 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200'
-                        }`}>
-                        {isActive ? '비활성화' : '활성화'}
-                      </button>
-                      {deleteConfirmId === profile.id ? (
-                        <>
-                          <button onClick={() => handleDelete(profile.id)}
-                            className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">
-                            탈퇴 확인
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {isDeleted ? (
+                        /* 탈퇴자: 복귀 버튼 */
+                        restoreConfirmId === profile.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <input type="text" value={restoreName} onChange={e => setRestoreName(e.target.value)}
+                              placeholder="복귀 이름" className="border border-gray-200 rounded px-2 py-1 text-xs w-24" />
+                            <button onClick={() => handleRestore(profile.id)} disabled={!restoreName.trim()}
+                              className="text-xs px-2.5 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 font-medium">복귀</button>
+                            <button onClick={() => { setRestoreConfirmId(null); setRestoreName('') }}
+                              className="text-xs px-2 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">취소</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setRestoreConfirmId(profile.id); setRestoreName(profile.name.replace(/^\[탈퇴\]\s*/, '')) }}
+                            className="text-xs px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 border border-blue-200 font-medium">
+                            복귀
                           </button>
-                          <button onClick={() => setDeleteConfirmId(null)}
-                            className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">
-                            취소
-                          </button>
-                        </>
+                        )
                       ) : (
-                        <button onClick={() => setDeleteConfirmId(profile.id)}
-                          className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 border border-red-200 font-medium">
-                          탈퇴처리
-                        </button>
+                        /* 활성 사용자: 비활성화 + 탈퇴 */
+                        <>
+                          <button onClick={() => handleToggleActive(profile.id, isActive)}
+                            className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors border ${
+                              isActive
+                                ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200'
+                                : 'bg-green-50 text-green-700 hover:bg-green-100 border-green-200'
+                            }`}>
+                            {isActive ? '비활성화' : '활성화'}
+                          </button>
+                          {deleteConfirmId === profile.id ? (
+                            <>
+                              <button onClick={() => handleDelete(profile.id)}
+                                className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium">
+                                탈퇴 확인
+                              </button>
+                              <button onClick={() => setDeleteConfirmId(null)}
+                                className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">
+                                취소
+                              </button>
+                            </>
+                          ) : (
+                            <button onClick={() => setDeleteConfirmId(profile.id)}
+                              className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 border border-red-200 font-medium">
+                              탈퇴처리
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -244,6 +295,33 @@ export default function AdminClient({ profiles, currentInviteCode, regionList, c
             })}
           </div>
         </div>
+        {/* 재배정 모달 */}
+        {reassignState && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4 max-w-md w-full mx-4 shadow-xl">
+              <h3 className="text-sm font-bold text-gray-900">담당자 재배정 필요</h3>
+              <p className="text-xs text-gray-600">
+                해당 사용자에게 배정된 부킹이 <span className="font-bold text-red-600">{reassignState.bookingCount}건</span> 있습니다.<br />
+                탈퇴 처리 전에 다른 담당자로 변경해주세요.
+              </p>
+              <select value={reassignState.targetId} onChange={e => setReassignState(prev => prev ? { ...prev, targetId: e.target.value } : null)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">담당자 선택</option>
+                {profiles.filter(p => p.id !== reassignState.userId && p.is_active !== false && !p.name.startsWith('[탈퇴]')).map(p => (
+                  <option key={p.id} value={p.id}>{p.name} ({p.email})</option>
+                ))}
+              </select>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setReassignState(null)}
+                  className="text-xs px-4 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">취소</button>
+                <button onClick={handleReassignAndDelete} disabled={!reassignState.targetId}
+                  className="text-xs px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-40 font-medium">
+                  재배정 후 탈퇴처리
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )

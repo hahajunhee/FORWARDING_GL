@@ -822,6 +822,9 @@ export default function BookingTable({
   editModeRef.current = editMode
   const bulkSavingRef = useRef(bulkSaving)
   bulkSavingRef.current = bulkSaving
+  const setRowEditsRef = useRef(setRowEdits)
+  setRowEditsRef.current = setRowEdits
+  // canManageBookingRef는 canManageBooking 정의 후 아래에서 설정
 
   // 마운트 시 localStorage에서 복원 (raw setter 사용 → 저장 루프 없음)
   useEffect(() => {
@@ -972,6 +975,8 @@ export default function BookingTable({
     const theirCustomers = handlerCustomers.split(',').map(s => s.trim()).filter(Boolean)
     return theirCustomers.some(c => myCustomerSet.has(c))
   }
+  const canManageBookingRef = useRef(canManageBooking)
+  canManageBookingRef.current = canManageBooking
 
   // 최종도착지별 행 배경색 맵
   const destinationColorMap = useMemo(() => {
@@ -1113,11 +1118,88 @@ export default function BookingTable({
     return () => window.removeEventListener('keydown', handler, { capture: true })
   }, []) // stable — refs만 사용
 
+  // Ctrl+X: 잘라내기 (복사 + 선택 범위 값 삭제)
+  // Delete: 선택 범위 값 삭제
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const isCtrlX = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x'
+      const isDelete = e.key === 'Delete'
+      if (!isCtrlX && !isDelete) return
+      if (!editModeRef.current) return
+      const start = cellSelStartRef.current
+      const end = cellSelEndRef.current
+      if (!start || !end) return
+      const active = document.activeElement
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return
+      e.preventDefault()
+
+      const cols = colsToRenderRef.current
+      const minR = Math.min(start.rowIdx, end.rowIdx)
+      const maxR = Math.max(start.rowIdx, end.rowIdx)
+      const minC = Math.min(start.colIdx, end.colIdx)
+      const maxC = Math.max(start.colIdx, end.colIdx)
+
+      // Ctrl+X인 경우 먼저 클립보드에 복사
+      if (isCtrlX) {
+        const rows: string[][] = []
+        for (let r = minR; r <= maxR; r++) {
+          const bk = visualOrderRef.current[r]
+          if (!bk) continue
+          const row: string[] = []
+          for (let c = minC; c <= maxC; c++) {
+            const col = cols[c]
+            if (!col) continue
+            if ('_blankSailing' in bk) row.push('')
+            else row.push(getCellTextValueRef.current(bk as Booking, col))
+          }
+          rows.push(row)
+        }
+        const tsv = rows.map(r => r.join('\t')).join('\n')
+        navigator.clipboard.writeText(tsv).catch(() => {})
+      }
+
+      // 선택 범위 값 삭제
+      const batchEdits: Record<string, Partial<Booking>> = {}
+      for (let r = minR; r <= maxR; r++) {
+        const bk = visualOrderRef.current[r]
+        if (!bk || '_blankSailing' in bk) continue
+        const booking = bk as Booking
+        if (!canManageBookingRef.current(booking)) continue
+        const changes: Partial<Booking> = {}
+        for (let c = minC; c <= maxC; c++) {
+          const col = cols[c]
+          if (!col || col === 'forwarder_handler' || col === 'week_no' || col === 'handler_region' || col === 'handler_customers' || col === 'final_qty') continue
+          const change = textToCellChangeRef.current(col, '')
+          if (change) {
+            if (change.extra_data) {
+              changes.extra_data = { ...((changes.extra_data as Record<string, string>) || {}), ...(change.extra_data as Record<string, string>) }
+            } else {
+              Object.assign(changes, change)
+            }
+          }
+        }
+        if (Object.keys(changes).length > 0) batchEdits[booking.id] = changes
+      }
+      if (Object.keys(batchEdits).length > 0) {
+        setRowEditsRef.current(prev => {
+          const next = { ...prev }
+          for (const [id, changes] of Object.entries(batchEdits)) {
+            next[id] = { ...(next[id] || {}), ...changes }
+          }
+          return next
+        })
+      }
+    }
+    window.addEventListener('keydown', handler, { capture: true })
+    return () => window.removeEventListener('keydown', handler, { capture: true })
+  }, [])
+
   const processed = useMemo(() => {
     let result = bookings.filter(b => {
       if (viewMode === 'mine' && b.forwarder_handler_id !== currentUserId) return false
       if (carrierFilter && b.carrier !== carrierFilter) return false
-      if (handlerFilter && b.forwarder_handler_id !== handlerFilter) return false
+      if (handlerFilter === '__unassigned__' && b.forwarder_handler_id) return false
+      if (handlerFilter && handlerFilter !== '__unassigned__' && b.forwarder_handler_id !== handlerFilter) return false
       if (regionFilter && b.forwarder_handler?.region !== regionFilter) return false
       if (customersFilter && !b.forwarder_handler?.customers?.includes(customersFilter)) return false
       const etd = b.proforma_etd
@@ -1409,6 +1491,8 @@ export default function BookingTable({
       }
     }
   }
+  const textToCellChangeRef = useRef(textToCellChange)
+  textToCellChangeRef.current = textToCellChange
 
   const handleTablePaste = (e: React.ClipboardEvent) => {
     if (!editMode || !cellSelStart) return
@@ -1418,8 +1502,9 @@ export default function BookingTable({
     if (!text) return
     e.preventDefault()
     const pasteRows = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd().split('\n').map(r => r.split('\t'))
-    const startRow = cellSelStart.rowIdx
-    const startCol = cellSelStart.colIdx
+    // 선택 범위의 왼쪽 상단을 기준점으로 사용
+    const startRow = cellSelEnd ? Math.min(cellSelStart.rowIdx, cellSelEnd.rowIdx) : cellSelStart.rowIdx
+    const startCol = cellSelEnd ? Math.min(cellSelStart.colIdx, cellSelEnd.colIdx) : cellSelStart.colIdx
     const batchEdits: Record<string, Partial<Booking>> = {}
     for (let ri = 0; ri < pasteRows.length; ri++) {
       const bookingRaw = visualOrderRef.current[startRow + ri]
@@ -1988,7 +2073,8 @@ export default function BookingTable({
           <select value={handlerFilter} onChange={e => setHandlerFilter(e.target.value)}
             className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
             <option value="">담당자 전체</option>
-            {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            <option value="__unassigned__">미지정</option>
+            {profiles.filter(p => p.is_active !== false && !p.name.startsWith('[탈퇴]')).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           {regionOptions.length > 0 && (
             <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)}
