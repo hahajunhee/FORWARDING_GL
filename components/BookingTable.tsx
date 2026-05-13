@@ -143,6 +143,17 @@ function getDayLabel(d: string | null | undefined): string {
   } catch { return '' }
 }
 
+function getDayOfWeek(d: string | null | undefined): { label: string; isWeekend: boolean } {
+  if (!d) return { label: '', isWeekend: false }
+  try {
+    const p = parseISO(d)
+    if (!isValid(p)) return { label: '', isWeekend: false }
+    const day = p.getDay() // 0=일, 6=토
+    const labels = ['일', '월', '화', '수', '목', '금', '토']
+    return { label: labels[day], isWeekend: day === 0 || day === 6 }
+  } catch { return { label: '', isWeekend: false } }
+}
+
 function getEtdClass(d: string | null | undefined): string {
   if (!d) return ''
   try {
@@ -629,10 +640,13 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
     case 'doc_cutoff_date': {
       const dc = getDocClass(booking.doc_cutoff_date)
       const dl = getDayLabel(booking.doc_cutoff_date)
+      const dow = getDayOfWeek(booking.doc_cutoff_date)
+      const weekendCls = dow.isWeekend ? 'bg-red-200 text-red-800 font-bold' : ''
       return (
-        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${dc}`}>
+        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${weekendCls || dc}`}>
           {fmtDate(booking.doc_cutoff_date)}
-          {dl && <span className="opacity-75">({dl})</span>}
+          {dow.label && <span className={dow.isWeekend ? 'font-bold' : 'opacity-75'}>({dow.label})</span>}
+          {dl && <span className="opacity-60 text-[10px]">{dl}</span>}
         </span>
       )
     }
