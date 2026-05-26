@@ -4,12 +4,13 @@ import { useState } from 'react'
 import Link from 'next/link'
 import BookingTable from './BookingTable'
 import DocCutoffTab from './DocCutoffTab'
+import ReeferCutoffTab from './ReeferCutoffTab'
 import ScheduleTab from './ScheduleTab'
 import { signOut } from '@/app/bookings/actions'
 import type { Booking, Profile, CustomList, ColumnDefinition } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE } from '@/types'
 
-type Tab = 'bookings' | 'doc_cutoff' | 'schedule'
+type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule'
 
 interface Props {
   bookings: Booking[]
@@ -47,6 +48,17 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'reefer_cutoff',
+    label: '리퍼마감메일',
+    sub: '부킹번호 조회',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
       </svg>
     ),
   },
@@ -209,6 +221,15 @@ export default function BookingPageLayout({
                 profiles={profiles}
                 currentUserId={currentUserId}
               />
+            </div>
+          )}
+          {activeTab === 'reefer_cutoff' && (
+            <div className="flex-1 overflow-auto p-4 space-y-3">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">리퍼마감메일</h2>
+                <p className="text-sm text-gray-500">부킹번호를 입력하면 부킹 정보를 조회하여 메일용 테이블을 생성합니다.</p>
+              </div>
+              <ReeferCutoffTab bookings={bookings} />
             </div>
           )}
           {activeTab === 'schedule' && (
