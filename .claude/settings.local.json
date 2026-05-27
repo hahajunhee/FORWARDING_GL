@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx next *)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} time=%{time_total}s\\\\n\" --max-time 30 http://localhost:3000/crawl)"
+    ]
+  }
+}
