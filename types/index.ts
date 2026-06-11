@@ -66,6 +66,7 @@ export interface Booking {
   qty_40_normal: number
   qty_40_dg: number
   qty_40_reefer: number
+  con_pickup_qty: number
   remarks: string
   booking_entries: BookingEntry[] | null
   extra_data: Record<string, string> | null
@@ -126,6 +127,7 @@ export const DEFAULT_COLUMN_ORDER = [
   'eta',
   'containers',
   'final_qty',
+  'con_pickup_qty',
   'remarks',
   'week_no',
 ]
@@ -151,6 +153,7 @@ export const COLUMN_LABELS: Record<string, string> = {
   eta:                  'ETA',
   containers:           '컨테이너',
   final_qty:            '최종수량',
+  con_pickup_qty:       '컨픽업수량',
   remarks:              '비고',
 }
 

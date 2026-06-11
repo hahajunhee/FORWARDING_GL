@@ -87,6 +87,7 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   eta:                  { label: 'ETA',             minW: 90  },
   containers:           { label: '컨테이너',        minW: 120 },
   final_qty:            { label: '최종수량',        minW: 80  },
+  con_pickup_qty:       { label: '컨픽업수량',      minW: 90  },
   remarks:              { label: '비고',            minW: 160 },
   week_no:              { label: '주차',             minW: 150 },
 }
@@ -112,7 +113,17 @@ function normalizeColOrder(stored: string[] | null | undefined, allKeys: string[
   if (!stored || stored.length === 0) return allKeys
   const valid = stored.filter((k: string) => allKeys.includes(k))
   const missing = allKeys.filter(k => !stored.includes(k))
-  return [...valid, ...missing]
+  // 새 열은 맨 끝이 아니라 기본 순서상 바로 앞 열의 뒤에 삽입
+  for (const m of missing) {
+    const defIdx = allKeys.indexOf(m)
+    let insertAt = valid.length
+    for (let i = defIdx - 1; i >= 0; i--) {
+      const vi = valid.indexOf(allKeys[i])
+      if (vi !== -1) { insertAt = vi + 1; break }
+    }
+    valid.splice(insertAt, 0, m)
+  }
+  return valid
 }
 
 // ── 헬퍼 ──────────────────────────────────────────────────────────
@@ -237,6 +248,7 @@ function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]
     case 'updated_etd': return b.updated_etd || ''
     case 'eta': return b.eta || ''
     case 'containers': return formatContainers(b)
+    case 'con_pickup_qty': return String(b.con_pickup_qty ?? 0).padStart(8, '0')
     case 'remarks': return b.remarks || ''
     default: {
       const cd = customColumns.find(c => c.key === col)
@@ -307,7 +319,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
           '모선명': 'BLANK SAILING', '주차': getWeekLabel(r.weekNum), '확보선복': '', 'MQC': '',
           '고객사서류담당': '', '포워더담당자': '', '서류마감일': '', 'Proforma ETD': '',
           'Updated ETD': '', 'ETA': '', '20일반': '', '20DG': '', '20리퍼': '',
-          '40일반': '', '40DG': '', '40리퍼': '', '비고': '',
+          '40일반': '', '40DG': '', '40리퍼': '', '컨픽업수량': '', '비고': '',
         }
       }
       const b = r as Booking
@@ -324,6 +336,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         'Updated ETD': b.updated_etd || '', 'ETA': b.eta || '',
         '20일반': b.qty_20_normal || 0, '20DG': b.qty_20_dg || 0, '20리퍼': b.qty_20_reefer || 0,
         '40일반': b.qty_40_normal || 0, '40DG': b.qty_40_dg || 0, '40리퍼': b.qty_40_reefer || 0,
+        '컨픽업수량': b.con_pickup_qty || 0,
         '비고': b.remarks,
       }
       for (const cd of customColumns) {
@@ -567,6 +580,8 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
       return <span className="text-xs text-gray-400 italic px-1.5">부킹번호 열에서 편집</span>
     case 'final_qty':
       return <span className="text-xs text-gray-400 italic px-1.5">자동 계산</span>
+    case 'con_pickup_qty':
+      return <input autoFocus={autoFocus} type="number" min={0} className={cls} value={row.con_pickup_qty ?? 0} onChange={e => onChange({ con_pickup_qty: Math.max(0, Number(e.target.value) || 0) })} placeholder="컨픽업수량" />
     case 'remarks':
       return <input autoFocus={autoFocus} className={cls} value={row.remarks || ''} onChange={e => onChange({ remarks: e.target.value })} placeholder="비고" />
     default: {
@@ -684,8 +699,14 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
       if (qty === null) return <span className="text-gray-300 text-xs">-</span>
       return <span className="text-xs font-semibold text-blue-700">{qty % 1 === 0 ? qty : qty.toFixed(1)}</span>
     }
+    case 'con_pickup_qty': {
+      const q = booking.con_pickup_qty || 0
+      if (q === 0) return <span className="text-gray-300 text-xs">-</span>
+      return <span className="text-xs font-semibold text-emerald-700">{q}</span>
+    }
     case 'remarks':
-      return <span className="truncate block text-xs text-gray-500 max-w-[160px]" title={booking.remarks}>{booking.remarks || '-'}</span>
+      // 줄넘김으로 전체 표시 (열 너비는 max-w로 고정, 자동 확장 안 함)
+      return <span className="block text-xs text-gray-500 max-w-[200px] whitespace-pre-wrap break-words">{booking.remarks || '-'}</span>
     default: {
       // custom_mmgcysit: 부킹수량 자동계산 열
       if (colKey === 'custom_mmgcysit') {
@@ -956,6 +977,7 @@ export default function BookingTable({
       case 'containers': return formatContainers(booking)
       case 'final_qty': { const q = calcFinalQty(booking); return q === null ? '' : (q % 1 === 0 ? String(q) : q.toFixed(1)) }
       case 'custom_mmgcysit': { const q = calcTotalQty(booking); return q > 0 ? (q % 1 === 0 ? String(q) : q.toFixed(1)) : '' }
+      case 'con_pickup_qty': return booking.con_pickup_qty ? String(booking.con_pickup_qty) : ''
       case 'remarks': return booking.remarks || ''
       default: {
         const cd = customColumns.find(c => c.key === col)
@@ -1495,6 +1517,7 @@ export default function BookingTable({
       case 'proforma_etd': return { proforma_etd: dateVal }
       case 'updated_etd': return { updated_etd: dateVal }
       case 'eta': return { eta: dateVal }
+      case 'con_pickup_qty': return { con_pickup_qty: Math.max(0, Number(v.replace(/[^\d.-]/g, '')) || 0) }
       case 'remarks': return { remarks: v }
       default: {
         const cd = customColumns.find(c => c.key === col)
