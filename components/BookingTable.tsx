@@ -310,45 +310,175 @@ function buildSpanMaps(rows: MergeableRow[], mergeEnabled: boolean): Record<stri
   return maps
 }
 
+// 엑셀 다운로드 — 웹 화면과 동일한 컬럼 구성 + 셀 스타일
 function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
-  import('xlsx').then((XLSX) => {
-    const data = rows.map(r => {
+  import('xlsx-js-style').then((mod) => {
+    const XLSX = (mod as unknown as { default: typeof import('xlsx-js-style') }).default ?? mod
+
+    // 컬럼 정의 — 웹 표시 순서와 일치 (DEFAULT_COLUMN_ORDER 기반)
+    type ColType = 'text' | 'number' | 'date' | 'qty'
+    type ColDef = { key: string; label: string; type: ColType; width?: number }
+    const cols: ColDef[] = [
+      { key: 'booking_no',           label: '부킹번호',        type: 'text',   width: 18 },
+      { key: 'final_destination',    label: '최종도착지',      type: 'text',   width: 14 },
+      { key: 'discharge_port',       label: '양하항',          type: 'text',   width: 18 },
+      { key: 'carrier',              label: '담당선사',        type: 'text',   width: 12 },
+      { key: 'vessel_name',          label: '모선명',          type: 'text',   width: 16 },
+      { key: 'voyage',               label: 'VOYAGE',          type: 'text',   width: 10 },
+      { key: 'week_no',              label: '주차',            type: 'text',   width: 7 },
+      { key: 'secured_space',        label: '확보선복',        type: 'text',   width: 9 },
+      { key: 'mqc',                  label: 'MQC',             type: 'text',   width: 8 },
+      { key: 'customer_doc_handler', label: '고객사 서류',     type: 'text',   width: 12 },
+      { key: 'forwarder_handler',    label: '포워더 담당',     type: 'text',   width: 11 },
+      { key: 'handler_region',       label: '담당지역',        type: 'text',   width: 10 },
+      { key: 'handler_customers',    label: '담당고객사',      type: 'text',   width: 14 },
+      { key: 'doc_cutoff_date',      label: '서류마감',        type: 'date',   width: 12 },
+      { key: 'proforma_etd',         label: 'Proforma ETD',    type: 'date',   width: 13 },
+      { key: 'updated_etd',          label: 'Updated ETD',     type: 'date',   width: 13 },
+      { key: 'eta',                  label: 'ETA',             type: 'date',   width: 12 },
+      { key: 'containers',           label: '컨테이너',        type: 'text',   width: 22 },
+      { key: 'final_qty',            label: '부킹수량(TEU)',   type: 'qty',    width: 12 },
+      { key: 'con_pickup_qty',       label: '컨픽업수량',      type: 'number', width: 10 },
+      { key: 'remarks',              label: '비고',            type: 'text',   width: 24 },
+      ...customColumns.map<ColDef>(cd => ({ key: `__custom_${cd.key}`, label: cd.label, type: 'text', width: 14 })),
+    ]
+
+    type CellValue = string | number | Date | null
+    const getValue = (r: DisplayRow, col: ColDef): CellValue => {
       if ('_blankSailing' in r) {
-        return {
-          '부킹번호': '', '최종도착지': r.final_destination, '양하항': '', '담당선사': '',
-          '모선명': 'BLANK SAILING', '주차': getWeekLabel(r.weekNum), '확보선복': '', 'MQC': '',
-          '고객사서류담당': '', '포워더담당자': '', '서류마감일': '', 'Proforma ETD': '',
-          'Updated ETD': '', 'ETA': '', '20일반': '', '20DG': '', '20리퍼': '',
-          '40일반': '', '40DG': '', '40리퍼': '', '컨픽업수량': '', '비고': '',
-        }
+        if (col.key === 'final_destination') return r.final_destination
+        if (col.key === 'vessel_name') return 'BLANK SAILING'
+        if (col.key === 'week_no') return getWeekLabel(r.weekNum)
+        return ''
       }
       const b = r as Booking
-      const bookingNos = (b.booking_entries && b.booking_entries.length > 0)
-        ? b.booking_entries.map(e => e.no).join(' / ')
-        : b.booking_no
-      const wn = getWeekNum(b.proforma_etd)
-      const base: Record<string, unknown> = {
-        '부킹번호': bookingNos, '최종도착지': b.final_destination, '양하항': b.discharge_port,
-        '담당선사': b.carrier, '모선명': b.vessel_name, '주차': wn !== null ? getWeekLabel(wn) : '',
-        '확보선복': b.secured_space, 'MQC': b.mqc,
-        '고객사서류담당': b.customer_doc_handler, '포워더담당자': b.forwarder_handler?.name || '',
-        '서류마감일': b.doc_cutoff_date || '', 'Proforma ETD': b.proforma_etd || '',
-        'Updated ETD': b.updated_etd || '', 'ETA': b.eta || '',
-        '20일반': b.qty_20_normal || 0, '20DG': b.qty_20_dg || 0, '20리퍼': b.qty_20_reefer || 0,
-        '40일반': b.qty_40_normal || 0, '40DG': b.qty_40_dg || 0, '40리퍼': b.qty_40_reefer || 0,
-        '컨픽업수량': b.con_pickup_qty || 0,
-        '비고': b.remarks,
+      const toDate = (d: string | null | undefined): Date | string => {
+        if (!d) return ''
+        try { const p = parseISO(d); return isValid(p) ? p : '' } catch { return '' }
       }
-      for (const cd of customColumns) {
-        base[cd.label] = (b.extra_data as Record<string, string> | null)?.[cd.key] || ''
+      switch (col.key) {
+        case 'booking_no':
+          return (b.booking_entries && b.booking_entries.length > 0)
+            ? b.booking_entries.map(e => e.no).filter(Boolean).join(' / ')
+            : (b.booking_no || '')
+        case 'final_destination':    return b.final_destination || ''
+        case 'discharge_port':       return b.discharge_port || ''
+        case 'carrier':              return b.carrier || ''
+        case 'vessel_name':          return b.vessel_name || ''
+        case 'voyage':               return b.voyage || ''
+        case 'week_no': {
+          const wn = getWeekNum(b.proforma_etd)
+          return wn !== null ? getWeekLabel(wn) : ''
+        }
+        case 'secured_space':        return b.secured_space || ''
+        case 'mqc':                  return b.mqc || ''
+        case 'customer_doc_handler': return b.customer_doc_handler || ''
+        case 'forwarder_handler':    return b.forwarder_handler?.name || ''
+        case 'handler_region':       return b.forwarder_handler?.region || ''
+        case 'handler_customers':    return b.forwarder_handler?.customers || ''
+        case 'doc_cutoff_date':      return toDate(b.doc_cutoff_date)
+        case 'proforma_etd':         return toDate(b.proforma_etd)
+        case 'updated_etd':          return toDate(b.updated_etd)
+        case 'eta':                  return toDate(b.eta)
+        case 'containers':           return formatContainers(b)
+        case 'final_qty': {
+          const q = calcTotalQty(b)
+          return q > 0 ? q : ''
+        }
+        case 'con_pickup_qty': {
+          const q = b.con_pickup_qty || 0
+          return q > 0 ? q : ''
+        }
+        case 'remarks':              return b.remarks || ''
+        default: {
+          if (col.key.startsWith('__custom_')) {
+            const ckey = col.key.replace('__custom_', '')
+            return (b.extra_data as Record<string, string> | null)?.[ckey] || ''
+          }
+          return ''
+        }
       }
-      return base
-    })
-    const ws = XLSX.utils.json_to_sheet(data)
+    }
+
+    // AOA 데이터 빌드 (헤더 + 행)
+    const header = cols.map(c => c.label)
+    const dataRows = rows.map(r => cols.map(c => getValue(r, c)))
+    const aoa: CellValue[][] = [header, ...dataRows]
+    const ws = XLSX.utils.aoa_to_sheet(aoa, { cellDates: true, dateNF: 'yyyy-mm-dd' })
+
+    // 셀 스타일 정의
+    const border = {
+      top:    { style: 'thin', color: { rgb: 'D1D5DB' } },
+      bottom: { style: 'thin', color: { rgb: 'D1D5DB' } },
+      left:   { style: 'thin', color: { rgb: 'D1D5DB' } },
+      right:  { style: 'thin', color: { rgb: 'D1D5DB' } },
+    } as const
+    const headerStyle = {
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11, name: '맑은 고딕' },
+      fill: { patternType: 'solid', fgColor: { rgb: '1E40AF' } },
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+      border: {
+        top:    { style: 'medium', color: { rgb: '1E3A8A' } },
+        bottom: { style: 'medium', color: { rgb: '1E3A8A' } },
+        left:   { style: 'thin',   color: { rgb: '3B82F6' } },
+        right:  { style: 'thin',   color: { rgb: '3B82F6' } },
+      },
+    }
+    const rowStyles = [
+      { fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFF' } } },
+      { fill: { patternType: 'solid', fgColor: { rgb: 'F9FAFB' } } },
+    ]
+
+    // 헤더 행 스타일
+    for (let c = 0; c < cols.length; c++) {
+      const addr = XLSX.utils.encode_cell({ r: 0, c })
+      if (!ws[addr]) ws[addr] = { t: 's', v: header[c] }
+      ws[addr].s = headerStyle
+    }
+
+    // 데이터 행 스타일 + 숫자/날짜 포맷
+    for (let r = 0; r < dataRows.length; r++) {
+      const rowFill = rowStyles[r % 2].fill
+      for (let c = 0; c < cols.length; c++) {
+        const addr = XLSX.utils.encode_cell({ r: r + 1, c })
+        const col = cols[c]
+        if (!ws[addr]) continue
+        const baseStyle: Record<string, unknown> = {
+          font: { sz: 10, name: '맑은 고딕' },
+          fill: rowFill,
+          alignment: { vertical: 'center', wrapText: col.key === 'remarks' || col.key === 'containers' },
+          border,
+        }
+        // 정렬: 숫자·날짜는 가운데, 텍스트는 좌측
+        if (col.type === 'number' || col.type === 'qty') {
+          ;(baseStyle.alignment as Record<string, unknown>).horizontal = 'center'
+          baseStyle.numFmt = '#,##0.##'
+        } else if (col.type === 'date') {
+          ;(baseStyle.alignment as Record<string, unknown>).horizontal = 'center'
+          baseStyle.numFmt = 'yyyy-mm-dd'
+        } else {
+          ;(baseStyle.alignment as Record<string, unknown>).horizontal = 'left'
+        }
+        // BLANK SAILING 강조
+        if ('_blankSailing' in rows[r] && col.key === 'vessel_name') {
+          baseStyle.font = { sz: 10, name: '맑은 고딕', bold: true, color: { rgb: 'D97706' } }
+          baseStyle.fill = { patternType: 'solid', fgColor: { rgb: 'FEF3C7' } }
+        }
+        ws[addr].s = baseStyle
+      }
+    }
+
+    // 열 너비
+    ws['!cols'] = cols.map(c => ({ wch: c.width ?? 12 }))
+    // 헤더 행 높이
+    ws['!rows'] = [{ hpt: 28 }]
+    // 첫 행 고정 (freeze pane)
+    ws['!freeze'] = { xSplit: 0, ySplit: 1 }
+    ws['!views'] = [{ state: 'frozen', xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft' }]
+
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '부킹목록')
-    ws['!cols'] = Object.keys(data[0] || {}).map(k => ({ wch: Math.max(k.length, 8) }))
-    XLSX.writeFile(wb, `부킹목록_${format(new Date(), 'yyyyMMdd')}.xlsx`)
+    XLSX.writeFile(wb, `부킹목록_${format(new Date(), 'yyyyMMdd')}.xlsx`, { cellStyles: true })
   })
 }
 
