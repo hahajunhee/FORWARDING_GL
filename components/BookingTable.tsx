@@ -337,10 +337,14 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
       { key: 'updated_etd',          label: 'Updated ETD',     type: 'date',   width: 13 },
       { key: 'eta',                  label: 'ETA',             type: 'date',   width: 12 },
       { key: 'containers',           label: '컨테이너',        type: 'text',   width: 22 },
-      { key: 'final_qty',            label: '부킹수량(TEU)',   type: 'qty',    width: 12 },
       { key: 'con_pickup_qty',       label: '컨픽업수량',      type: 'number', width: 10 },
       { key: 'remarks',              label: '비고',            type: 'text',   width: 24 },
-      ...customColumns.map<ColDef>(cd => ({ key: `__custom_${cd.key}`, label: cd.label, type: 'text', width: 14 })),
+      ...customColumns.map<ColDef>(cd => ({
+        key: `__custom_${cd.key}`,
+        label: cd.label,
+        type: cd.key === 'custom_mmgcysit' ? 'qty' : 'text',
+        width: cd.key === 'custom_mmgcysit' ? 10 : 14,
+      })),
     ]
 
     type CellValue = string | number | Date | null
@@ -381,10 +385,6 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         case 'updated_etd':          return toDate(b.updated_etd)
         case 'eta':                  return toDate(b.eta)
         case 'containers':           return formatContainers(b)
-        case 'final_qty': {
-          const q = calcTotalQty(b)
-          return q > 0 ? q : ''
-        }
         case 'con_pickup_qty': {
           const q = b.con_pickup_qty || 0
           return q > 0 ? q : ''
@@ -393,6 +393,11 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         default: {
           if (col.key.startsWith('__custom_')) {
             const ckey = col.key.replace('__custom_', '')
+            // custom_mmgcysit는 웹과 동일하게 자동 계산 (extra_data 사용 안 함)
+            if (ckey === 'custom_mmgcysit') {
+              const q = calcTotalQty(b)
+              return q > 0 ? q : ''
+            }
             return (b.extra_data as Record<string, string> | null)?.[ckey] || ''
           }
           return ''
