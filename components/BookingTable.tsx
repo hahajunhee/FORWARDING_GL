@@ -69,6 +69,7 @@ const MERGE_HIERARCHY = ['final_destination'] as const
 // ── 기본 열 정의 ───────────────────────────────────────────────────
 
 const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
+  seq_no:               { label: '고유번호',      minW: 70  },
   booking_no:           { label: '부킹번호',      minW: 200 },
   final_destination:    { label: '최종도착지',     minW: 120 },
   discharge_port:       { label: '양하항',         minW: 120 },
@@ -231,6 +232,7 @@ function getMonthLabel(key: string): string {
 
 function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]): string {
   switch (col) {
+    case 'seq_no': return String(b.seq_no ?? 0).padStart(12, '0')
     case 'booking_no': return (b.booking_entries && b.booking_entries.length > 0) ? b.booking_entries[0].no : (b.booking_no || '')
     case 'final_destination': return b.final_destination || ''
     case 'discharge_port': return b.discharge_port || ''
@@ -319,6 +321,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
     type ColType = 'text' | 'number' | 'date' | 'qty'
     type ColDef = { key: string; label: string; type: ColType; width?: number }
     const cols: ColDef[] = [
+      { key: 'seq_no',               label: '고유번호',        type: 'number', width: 8 },
       { key: 'booking_no',           label: '부킹번호',        type: 'text',   width: 18 },
       { key: 'final_destination',    label: '최종도착지',      type: 'text',   width: 14 },
       { key: 'discharge_port',       label: '양하항',          type: 'text',   width: 18 },
@@ -361,6 +364,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         try { const p = parseISO(d); return isValid(p) ? p : '' } catch { return '' }
       }
       switch (col.key) {
+        case 'seq_no':               return b.seq_no ?? ''
         case 'booking_no':
           return (b.booking_entries && b.booking_entries.length > 0)
             ? b.booking_entries.map(e => e.no).filter(Boolean).join(' / ')
@@ -665,6 +669,8 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
 }) {
   const cls = "w-full h-full border-0 px-1.5 py-1 text-xs bg-transparent focus:outline-none"
   switch (colKey) {
+    case 'seq_no':
+      return <span className="text-xs font-mono text-gray-400 italic px-1.5">{row.seq_no ?? '자동'}</span>
     case 'booking_no': {
       const entries: BookingEntry[] = (row.booking_entries as BookingEntry[] | undefined) ||
         (row.booking_no ? [{ no: row.booking_no as string, ctr_type: '20', ctr_qty: 1 }] : [{ no: '', ctr_type: '20', ctr_qty: 1 }])
@@ -745,6 +751,8 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
   colKey: string; booking: Booking; currentUserId: string; customColumns: ColumnDefinition[]; carrierColorMap?: Record<string, string>
 }) {
   switch (colKey) {
+    case 'seq_no':
+      return <span className="text-xs font-mono font-semibold text-gray-500">{booking.seq_no ?? '-'}</span>
     case 'booking_no':
       if (booking.booking_entries && booking.booking_entries.length > 0) {
         return (

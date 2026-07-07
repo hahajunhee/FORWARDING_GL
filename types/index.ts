@@ -44,6 +44,7 @@ export interface Profile {
 
 export interface Booking {
   id: string
+  seq_no: number
   booking_no: string
   final_destination: string
   discharge_port: string
@@ -98,6 +99,18 @@ export interface BookingFormData {
   remarks: string
 }
 
+export interface ShanghaiMgmtRow {
+  id: string
+  booking_seq_no: number | null
+  sort_order: number
+  first_departure: string   // F 최초 출항일
+  current_departure: string // G 현재 출항일
+  delay_shanghai: string    // H 지연일 (상해/닝보)
+  delay_busan: string       // L 지연일 (부산)
+  created_at: string
+  updated_at: string
+}
+
 export interface CustomList {
   id: string
   user_id: string
@@ -109,6 +122,7 @@ export interface CustomList {
 }
 
 export const DEFAULT_COLUMN_ORDER = [
+  'seq_no',
   'booking_no',
   'final_destination',
   'discharge_port',
@@ -135,6 +149,7 @@ export const DEFAULT_COLUMN_ORDER = [
 export const DEFAULT_PINNED_COLUMNS = ['forwarder_handler', 'discharge_port', 'final_destination']
 
 export const COLUMN_LABELS: Record<string, string> = {
+  seq_no:               '고유번호',
   booking_no:           '부킹번호',
   final_destination:    '최종도착지',
   discharge_port:       '양하항',

@@ -6,11 +6,12 @@ import BookingTable from './BookingTable'
 import DocCutoffTab from './DocCutoffTab'
 import ReeferCutoffTab from './ReeferCutoffTab'
 import ScheduleTab from './ScheduleTab'
+import ShanghaiMgmtTab from './ShanghaiMgmtTab'
 import { signOut } from '@/app/bookings/actions'
-import type { Booking, Profile, CustomList, ColumnDefinition } from '@/types'
+import type { Booking, Profile, CustomList, ColumnDefinition, ShanghaiMgmtRow } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE } from '@/types'
 
-type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule'
+type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule' | 'shanghai'
 
 interface Props {
   bookings: Booking[]
@@ -26,6 +27,7 @@ interface Props {
   baseColDescriptions: Record<string, string>
   baseColLabels?: Record<string, string>
   destinationSortOrder?: string[]
+  shanghaiRows?: ShanghaiMgmtRow[]
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -73,13 +75,24 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
       </svg>
     ),
   },
+  {
+    key: 'shanghai',
+    label: '상해발관리',
+    sub: '고유번호 집중관리',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+      </svg>
+    ),
+  },
 ]
 
 const MASTER_EMAIL = 'hahajunhee@glovis.net'
 
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns, initialScheduleCols,
-  regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [],
+  regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [], shanghaiRows = [],
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -239,6 +252,15 @@ export default function BookingPageLayout({
                 <p className="text-sm text-gray-500">고객사 송부용 스케줄을 열 구성 후 Excel로 다운로드합니다.</p>
               </div>
               <ScheduleTab bookings={bookings} customColumns={customColumns} initialScheduleCols={initialScheduleCols} destinationSortOrder={destinationSortOrder} />
+            </div>
+          )}
+          {activeTab === 'shanghai' && (
+            <div className="flex-1 overflow-auto p-4 space-y-3">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">상해발관리</h2>
+                <p className="text-sm text-gray-500">부킹장의 고유번호로 집중관리 대상을 추가하고, MPA 주요 PDC 스케줄 현황 보고서를 Excel로 다운로드합니다.</p>
+              </div>
+              <ShanghaiMgmtTab bookings={bookings} initialRows={shanghaiRows} />
             </div>
           )}
         </main>

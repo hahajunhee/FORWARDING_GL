@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import BookingPageLayout from '@/components/BookingPageLayout'
-import type { Booking, Profile, CustomList, ColumnDefinition } from '@/types'
+import type { Booking, Profile, CustomList, ColumnDefinition, ShanghaiMgmtRow } from '@/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +22,8 @@ export default async function BookingsPage() {
     { data: baseDescSetting },
     { data: baseColLabelsSetting },
     { data: destSortSetting },
+    { data: shanghaiRows },
+    { data: seqRows },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -37,11 +39,24 @@ export default async function BookingsPage() {
     supabase.from('global_settings').select('value').eq('key', 'base_col_descriptions').single(),
     supabase.from('global_settings').select('value').eq('key', 'base_col_labels').single(),
     supabase.from('global_settings').select('value').eq('key', 'destination_sort_order').single(),
+    supabase.from('shanghai_mgmt').select('*').order('sort_order').order('created_at'),
+    // seq_no(고유번호)는 별도 조회로 병합 — 마이그레이션 미적용 시에도 부킹장이 깨지지 않도록 방어
+    supabase.from('bookings').select('id, seq_no'),
   ])
+
+  // seq_no 병합 (컬럼 없거나 오류 시 무시)
+  const seqMap = new Map<string, number>()
+  for (const r of (seqRows || []) as { id: string; seq_no: number | null }[]) {
+    if (r.seq_no != null) seqMap.set(r.id, r.seq_no)
+  }
+  const bookingsWithSeq = ((bookings || []) as unknown as Booking[]).map(b => ({
+    ...b,
+    seq_no: seqMap.get(b.id) ?? b.seq_no,
+  }))
 
   return (
     <BookingPageLayout
-      bookings={(bookings || []) as unknown as Booking[]}
+      bookings={bookingsWithSeq}
       profiles={(profiles || []) as Profile[]}
       currentUserId={user.id}
       currentUserEmail={user.email || ''}
@@ -54,6 +69,7 @@ export default async function BookingsPage() {
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}
       baseColLabels={(baseColLabelsSetting?.value as Record<string, string> | null) || {}}
       destinationSortOrder={(destSortSetting?.value as string[] | null) || []}
+      shanghaiRows={(shanghaiRows || []) as ShanghaiMgmtRow[]}
     />
   )
 }

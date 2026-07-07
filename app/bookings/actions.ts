@@ -212,3 +212,44 @@ export async function signOut() {
   await supabase.auth.signOut()
   redirect('/login')
 }
+
+// ── 상해발관리 저장 (전체 공유 목록 전체 교체) ─────────────────────
+
+export type ShanghaiRowInput = {
+  booking_seq_no: number | null
+  first_departure: string
+  current_departure: string
+  delay_shanghai: string
+  delay_busan: string
+}
+
+export async function saveShanghaiMgmt(
+  rows: ShanghaiRowInput[]
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  // 전체 교체 방식: 기존 행 모두 삭제 후 현재 목록 삽입
+  const { error: delErr } = await supabase
+    .from('shanghai_mgmt')
+    .delete()
+    .neq('id', '00000000-0000-0000-0000-000000000000')
+  if (delErr) return { error: delErr.message }
+
+  if (rows.length > 0) {
+    const payload = rows.map((r, i) => ({
+      booking_seq_no: r.booking_seq_no,
+      sort_order: i,
+      first_departure: r.first_departure || '',
+      current_departure: r.current_departure || '',
+      delay_shanghai: r.delay_shanghai || '',
+      delay_busan: r.delay_busan || '',
+    }))
+    const { error: insErr } = await supabase.from('shanghai_mgmt').insert(payload)
+    if (insErr) return { error: insErr.message }
+  }
+
+  revalidatePath('/bookings')
+  return { error: null }
+}
