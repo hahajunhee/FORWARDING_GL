@@ -103,10 +103,11 @@ export interface ShanghaiMgmtRow {
   id: string
   booking_seq_no: number | null
   sort_order: number
-  first_departure: string   // F 최초 출항일
-  current_departure: string // G 현재 출항일
-  delay_shanghai: string    // H 지연일 (상해/닝보)
-  delay_busan: string       // L 지연일 (부산)
+  first_departure: string   // F 최초 출항일 (수동)
+  current_departure: string // G 현재 출항일 (수동)
+  berthing: string          // K 접안일 (수동)
+  delay_shanghai: string    // (미사용 — H는 자동계산)
+  delay_busan: string       // (미사용 — L은 자동계산)
   created_at: string
   updated_at: string
 }

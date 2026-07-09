@@ -1733,37 +1733,39 @@ export default function BookingTable({
     }, ...prev])
   }
 
-  const handleCopyRow = (booking: Booking) => {
+  // keepAll=false(복사): 부킹번호·모선명·VOYAGE·서류마감·ETD·ETA·비고 초기화
+  // keepAll=true(기존유지): 모든 값을 그대로 복제
+  const handleCopyRow = (booking: Booking, keepAll: boolean = false) => {
     const scrollTop = tableWrapperRef.current?.scrollTop ?? 0
     const scrollLeft = tableWrapperRef.current?.scrollLeft ?? 0
     if (!editMode) setEditMode(true)
     const tempId = `new-${Date.now()}`
     setNewRows(prev => [{
       tempId,
-      booking_no: '',
+      booking_no: keepAll ? (booking.booking_no || '') : '',
       final_destination: booking.final_destination || '',
       discharge_port: booking.discharge_port || '',
       carrier: booking.carrier || '',
-      vessel_name: '',
-      voyage: '',
+      vessel_name: keepAll ? (booking.vessel_name || '') : '',
+      voyage: keepAll ? (booking.voyage || '') : '',
       secured_space: booking.secured_space || '',
       mqc: booking.mqc || '',
       customer_doc_handler: booking.customer_doc_handler || '',
       forwarder_handler_id: booking.forwarder_handler_id,
-      doc_cutoff_date: null,
-      proforma_etd: null,
-      updated_etd: null,
-      eta: null,
+      doc_cutoff_date: keepAll ? (booking.doc_cutoff_date || null) : null,
+      proforma_etd: keepAll ? (booking.proforma_etd || null) : null,
+      updated_etd: keepAll ? (booking.updated_etd || null) : null,
+      eta: keepAll ? (booking.eta || null) : null,
       qty_20_normal: booking.qty_20_normal || 0,
       qty_20_dg: booking.qty_20_dg || 0,
       qty_20_reefer: booking.qty_20_reefer || 0,
       qty_40_normal: booking.qty_40_normal || 0,
       qty_40_dg: booking.qty_40_dg || 0,
       qty_40_reefer: booking.qty_40_reefer || 0,
-      remarks: booking.remarks || '',
+      remarks: keepAll ? (booking.remarks || '') : '',
       extra_data: { ...(booking.extra_data || {}) },
       booking_entries: booking.booking_entries
-        ? booking.booking_entries.map(e => ({ ...e, no: '' }))
+        ? booking.booking_entries.map(e => keepAll ? { ...e } : { ...e, no: '' })
         : [{ no: '', ctr_type: '20', ctr_qty: 1 }],
     }, ...prev])
     // 스크롤 위치 복원
@@ -1931,9 +1933,12 @@ export default function BookingTable({
                   setRowErrors(p => { const c = { ...p }; delete c[booking.id]; return c })
                 }} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition-colors">되돌리기</button>
               )}
-              <button onClick={() => handleCopyRow(booking)}
+              <button onClick={() => handleCopyRow(booking, false)}
                 className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-                title="이 행을 복사하여 새 행으로 추가">복사</button>
+                title="부킹번호·모선명·VOYAGE·서류마감·ETD·ETA·비고는 비우고 복사">복사</button>
+              <button onClick={() => handleCopyRow(booking, true)}
+                className="text-xs px-2 py-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition-colors"
+                title="모든 값을 그대로 유지하여 복제">기존유지</button>
               {isOwnBooking && (
                 deleteConfirmId === booking.id ? (
                   <>

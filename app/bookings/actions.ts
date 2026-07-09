@@ -217,10 +217,9 @@ export async function signOut() {
 
 export type ShanghaiRowInput = {
   booking_seq_no: number | null
-  first_departure: string
-  current_departure: string
-  delay_shanghai: string
-  delay_busan: string
+  first_departure: string   // F 최초 출항일
+  current_departure: string // G 현재 출항일
+  berthing: string          // K 접안일
 }
 
 export async function saveShanghaiMgmt(
@@ -238,15 +237,18 @@ export async function saveShanghaiMgmt(
   if (delErr) return { error: delErr.message }
 
   if (rows.length > 0) {
-    const payload = rows.map((r, i) => ({
+    const base = rows.map((r, i) => ({
       booking_seq_no: r.booking_seq_no,
       sort_order: i,
       first_departure: r.first_departure || '',
       current_departure: r.current_departure || '',
-      delay_shanghai: r.delay_shanghai || '',
-      delay_busan: r.delay_busan || '',
     }))
-    const { error: insErr } = await supabase.from('shanghai_mgmt').insert(payload)
+    const payload = base.map((b, i) => ({ ...b, berthing: rows[i].berthing || '' }))
+    let { error: insErr } = await supabase.from('shanghai_mgmt').insert(payload)
+    // migration v15(berthing) 미적용 시 접안일 없이 재시도 (F/G는 저장되도록)
+    if (insErr && /berthing/i.test(insErr.message)) {
+      ({ error: insErr } = await supabase.from('shanghai_mgmt').insert(base))
+    }
     if (insErr) return { error: insErr.message }
   }
 
