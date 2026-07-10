@@ -224,11 +224,21 @@ export type ShanghaiRowInput = {
 }
 
 export async function saveShanghaiMgmt(
-  rows: ShanghaiRowInput[]
+  rows: ShanghaiRowInput[],
+  securedUpdates: { id: string; secured_space: string }[] = []
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
+
+  // 확보선복 편집분을 부킹 원본에 반영 (부킹장 탭에도 즉시 반영됨)
+  if (securedUpdates.length > 0) {
+    const results = await Promise.all(
+      securedUpdates.map(u => supabase.from('bookings').update({ secured_space: u.secured_space }).eq('id', u.id))
+    )
+    const upErr = results.find(r => r.error)?.error
+    if (upErr) return { error: upErr.message }
+  }
 
   // 전체 교체 방식: 기존 행 모두 삭제 후 현재 목록 삽입
   const { error: delErr } = await supabase

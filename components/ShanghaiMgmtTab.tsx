@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { format, parseISO, isValid, differenceInCalendarDays } from 'date-fns'
 import type { Booking, ShanghaiMgmtRow } from '@/types'
 import { calcTotalQty } from './BookingTable'
@@ -68,13 +69,22 @@ type LocalRow = {
   current_departure: string // G
   berthing: string          // K (접안일 수동)
   mqc: string               // O MQC(/WK) (수동)
+  secured_space: string     // P 확보선복 (수동 — 부킹 원본에 반영)
 }
 
 type EditField = keyof Omit<LocalRow, 'key' | 'booking_seq_no'>
 // 수동 편집 열 순서 (엑셀형 이동/붙여넣기 기준)
-const EDITABLE: EditField[] = ['first_departure', 'current_departure', 'berthing', 'mqc']
-// 날짜 자동정규화 대상 (MQC는 숫자라 제외)
+const EDITABLE: EditField[] = ['first_departure', 'current_departure', 'berthing', 'mqc', 'secured_space']
+// 날짜 자동정규화 대상 (MQC·확보선복은 숫자라 제외)
 const DATE_FIELDS = new Set<EditField>(['first_departure', 'current_departure', 'berthing'])
+
+// 확보선복 기본값 = 부킹의 확보선복, 없으면 실마감물량(TEU)
+function securedDefault(b?: Booking): string {
+  if (!b) return ''
+  if (b.secured_space) return b.secured_space
+  const q = calcTotalQty(b)
+  return q > 0 ? String(q) : ''
+}
 
 interface Props {
   bookings: Booking[]
@@ -82,6 +92,7 @@ interface Props {
 }
 
 export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
+  const router = useRouter()
   const bySeq = useMemo(() => {
     const m = new Map<number, Booking>()
     for (const b of bookings) if (b.seq_no != null) m.set(b.seq_no, b)
@@ -92,15 +103,20 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
   const nextKey = () => `r${keyCounter.current++}`
 
   const [rows, setRows] = useState<LocalRow[]>(() =>
-    initialRows.map(r => ({
-      key: r.id,
-      booking_seq_no: r.booking_seq_no,
-      first_departure: r.first_departure || '',
-      current_departure: r.current_departure || '',
-      berthing: r.berthing || '',
-      // 저장된 MQC 없으면 부킹의 MQC를 초기값으로
-      mqc: r.mqc || (r.booking_seq_no != null ? (bookings.find(b => b.seq_no === r.booking_seq_no)?.mqc || '') : ''),
-    }))
+    initialRows.map(r => {
+      const bk = r.booking_seq_no != null ? bookings.find(b => b.seq_no === r.booking_seq_no) : undefined
+      return {
+        key: r.id,
+        booking_seq_no: r.booking_seq_no,
+        first_departure: r.first_departure || '',
+        current_departure: r.current_departure || '',
+        berthing: r.berthing || '',
+        // 저장된 MQC 없으면 부킹의 MQC를 초기값으로
+        mqc: r.mqc || (bk?.mqc || ''),
+        // 확보선복: 부킹값, 없으면 실마감물량
+        secured_space: securedDefault(bk),
+      }
+    })
   )
   // 도착지별 MQC 기본값 입력 (일괄 적용용, 비영속)
   const [mqcDefaults, setMqcDefaults] = useState<Record<string, string>>({})
@@ -173,13 +189,13 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
       // 도착지 기본값 있으면 우선, 없으면 부킹 자체 MQC
       const dest = bk?.final_destination || ''
       const mqcInit = mqcDefaults[dest] || bk?.mqc || ''
-      additions.push({ key: nextKey(), booking_seq_no: n, first_departure: '', current_departure: '', berthing: '', mqc: mqcInit })
+      additions.push({ key: nextKey(), booking_seq_no: n, first_departure: '', current_departure: '', berthing: '', mqc: mqcInit, secured_space: securedDefault(bk) })
     }
     if (additions.length > 0) setRows(prev => [...prev, ...additions])
     setNotFound(missing)
     setInput('')
   }
-  const addBlankRow = () => setRows(prev => [...prev, { key: nextKey(), booking_seq_no: null, first_departure: '', current_departure: '', berthing: '', mqc: '' }])
+  const addBlankRow = () => setRows(prev => [...prev, { key: nextKey(), booking_seq_no: null, first_departure: '', current_departure: '', berthing: '', mqc: '', secured_space: '' }])
   const updateRow = (key: string, field: EditField, value: string) =>
     setRows(prev => prev.map(r => r.key === key ? { ...r, [field]: value } : r))
 
@@ -210,17 +226,32 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
 
   const handleSave = () => {
     setSaveError(null)
+    // 확보선복이 부킹 원본과 달라진 것만 반영
+    const securedUpdates: { id: string; secured_space: string }[] = []
+    for (const r of rows) {
+      if (r.booking_seq_no == null) continue
+      const b = bySeq.get(r.booking_seq_no)
+      if (b && (r.secured_space || '') !== (b.secured_space || '')) {
+        securedUpdates.push({ id: b.id, secured_space: r.secured_space })
+      }
+    }
     startTransition(async () => {
       setSaveState('saving')
-      const result = await saveShanghaiMgmt(rows.map(r => ({
-        booking_seq_no: r.booking_seq_no,
-        first_departure: r.first_departure,
-        current_departure: r.current_departure,
-        berthing: r.berthing,
-        mqc: r.mqc,
-      })))
+      const result = await saveShanghaiMgmt(
+        rows.map(r => ({
+          booking_seq_no: r.booking_seq_no,
+          first_departure: r.first_departure,
+          current_departure: r.current_departure,
+          berthing: r.berthing,
+          mqc: r.mqc,
+        })),
+        securedUpdates,
+      )
       if (result.error) { setSaveError(result.error); setSaveState('error') }
-      else { setSaveState('saved'); setTimeout(() => setSaveState('idle'), 3000) }
+      else {
+        setSaveState('saved'); setTimeout(() => setSaveState('idle'), 3000)
+        if (securedUpdates.length > 0) router.refresh() // 부킹장 탭에 확보선복 반영
+      }
     })
   }
 
@@ -232,7 +263,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
 
       const groupRow = ['법인', '법인/대리점', '도착지', '선사', '선명 & VOYAGE',
         '상해 / 닝보(PUS 직전 PORT 기준)', '', '', '부산', '', '', '', '', '',
-        'MQC (/WK)', '확보 선복', '실 매김 물량']
+        'MQC (/WK)', '확보 선복', '실 마감 물량']
       const subRow = ['', '', '', '', '', '최초 출항일', '현재 출항일', '지연일',
         '부산출항(최초)', '부산출항(현재 ETD)', '접안일', '지연일', '서류마감', 'P.O.D ETA', '', '', '']
       const titleRow = [TITLE, ...Array(16).fill('')]
@@ -250,7 +281,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
           toExcelDate(b?.proforma_etd), toExcelDate(b?.updated_etd), r.berthing,
           l ?? '',
           toExcelDate(b?.doc_cutoff_date), toExcelDate(b?.eta),
-          r.mqc || '', b?.secured_space || '', b ? (calcTotalQty(b) || '') : '',
+          r.mqc || '', r.secured_space || '', b ? (calcTotalQty(b) || '') : '',
         ]
       })
 
@@ -440,7 +471,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
                   <th colSpan={6} className={`${th} bg-[#BF9000]`}>부산</th>
                   <th rowSpan={2} className={`${th} ${thOrange}`}>MQC<br />(/WK)</th>
                   <th rowSpan={2} className={`${th} ${thOrange}`}>확보<br />선복</th>
-                  <th rowSpan={2} className={`${th} ${thOrange}`}>실 매김<br />물량</th>
+                  <th rowSpan={2} className={`${th} ${thOrange}`}>실 마감<br />물량</th>
                   <th rowSpan={2} className={`${th} bg-gray-400`}>삭제</th>
                 </tr>
                 <tr>
@@ -521,8 +552,17 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
                           placeholder="MQC"
                           className="w-14 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
                       </td>
-                      {/* P,Q 자동 */}
-                      <td className={`${td} text-gray-700`}>{b?.secured_space || dash}</td>
+                      {/* P 확보선복 (수동 편집 — 부킹에도 반영) */}
+                      <td className="px-1 py-1 border border-gray-200 bg-orange-50/30">
+                        <input value={r.secured_space}
+                          ref={el => { inputRefs.current[`${idx}:secured_space`] = el }}
+                          onChange={e => updateRow(r.key, 'secured_space', e.target.value)}
+                          onKeyDown={e => handleNav(e, idx, 'secured_space')}
+                          onPaste={e => handleCellPaste(e, idx, 'secured_space')}
+                          placeholder="확보선복"
+                          className="w-14 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
+                      </td>
+                      {/* Q 실마감물량 (자동) */}
                       <td className={`${td} font-semibold text-blue-700`}>{b ? (calcTotalQty(b) || dash) : dash}</td>
                       {/* 삭제 */}
                       <td className={td}><button onClick={() => removeRow(r.key)} className="text-gray-300 hover:text-red-500 transition-colors">✕</button></td>
