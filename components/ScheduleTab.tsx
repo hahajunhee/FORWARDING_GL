@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useTransition, useEffect } from 'react'
+import { useState, useMemo, useRef, useTransition, useEffect } from 'react'
 import { format, parseISO, isValid } from 'date-fns'
 import type { Booking, ColumnDefinition } from '@/types'
 import { COLUMN_LABELS, DEFAULT_COLUMN_ORDER } from '@/types'
@@ -190,6 +190,21 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
   const [voyageMerge, _setVoyageMerge] = useState(false)
   const [mobisOnly, setMobisOnly] = useState(false)
 
+  // ── 엑셀형 기능: 열 필터 · 헤더 정렬 · 범위선택 복사 ─────────────
+  const [colFilters, setColFilters] = useState<Record<string, string[]>>({}) // col → 허용값 목록 (키 없음=전체)
+  const [openFilterCol, setOpenFilterCol] = useState<string | null>(null)
+  const [filterSearch, setFilterSearch] = useState('')
+  const [selAnchor, setSelAnchor] = useState<{ r: number; c: number } | null>(null)
+  const [selFocus, setSelFocus] = useState<{ r: number; c: number } | null>(null)
+  const [rangeCopied, setRangeCopied] = useState(false)
+  const draggingRef = useRef(false)
+
+  useEffect(() => {
+    const up = () => { draggingRef.current = false }
+    window.addEventListener('mouseup', up)
+    return () => window.removeEventListener('mouseup', up)
+  }, [])
+
   useEffect(() => {
     try {
       const s1 = localStorage.getItem('sched_sort1')
@@ -292,15 +307,22 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
       : null
   , [destinationSortOrder])
 
+  // ETD·모비스 필터만 적용된 기본 목록 (열 필터 드롭다운의 고유값 소스)
+  const etdBase = useMemo(() => bookings.filter(b => {
+    const etd = b.updated_etd || b.proforma_etd
+    if (!etd) return false
+    if (etdFrom && etd < etdFrom) return false
+    if (etdTo && etd > etdTo) return false
+    if (mobisOnly && !b.forwarder_handler?.customers?.includes('모비스 AS(20010)')) return false
+    return true
+  }), [bookings, etdFrom, etdTo, mobisOnly])
+
   const filtered = useMemo(() => {
-    const etdFiltered = bookings.filter(b => {
-      const etd = b.updated_etd || b.proforma_etd
-      if (!etd) return false
-      if (etdFrom && etd < etdFrom) return false
-      if (etdTo && etd > etdTo) return false
-      if (mobisOnly && !b.forwarder_handler?.customers?.includes('모비스 AS(20010)')) return false
-      return true
-    })
+    // 열 필터 적용 (엑셀 자동필터: 허용값 목록에 있는 행만)
+    const active = Object.entries(colFilters)
+    const etdFiltered = active.length === 0 ? etdBase : etdBase.filter(b =>
+      active.every(([col, vals]) => vals.includes(getCellValue(b, col, customColumns)))
+    )
 
     const levels = [sort1, sort2, sort3].filter(Boolean) as { col: string; dir: 'asc' | 'desc' }[]
     if (levels.length === 0) {
@@ -326,9 +348,34 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
       }
       return 0
     })
-  }, [bookings, etdFrom, etdTo, mobisOnly, sort1, sort2, sort3, customColumns, destOrderMap])
+  }, [etdBase, colFilters, sort1, sort2, sort3, customColumns, destOrderMap])
 
   const hasSorts = !!(sort1 || sort2 || sort3)
+
+  // 필터 드롭다운 옵션 (열린 열의 고유값)
+  const filterOptions = useMemo(() => {
+    if (!openFilterCol) return []
+    const s = new Set<string>()
+    for (const b of etdBase) s.add(getCellValue(b, openFilterCol, customColumns))
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'ko'))
+  }, [openFilterCol, etdBase, customColumns])
+
+  // 열 제목 정렬 표시 (1·2·3차 중 어느 단계인지)
+  const sortIndicator = (col: string) => {
+    const levels = [sort1, sort2, sort3]
+    const i = levels.findIndex(l => l?.col === col)
+    return i === -1 ? null : { dir: levels[i]!.dir, level: i + 1 }
+  }
+  // 열 제목 클릭: 오름 → 내림 → 해제 (1차 정렬 기준으로 설정)
+  const handleHeaderSort = (col: string) => {
+    if (isSpacerCol(col)) return
+    if (sort1?.col === col) {
+      if (sort1.dir === 'asc') setSort1({ col, dir: 'desc' })
+      else setSort1(null)
+    } else {
+      setSort1({ col, dir: 'asc' })
+    }
+  }
 
   // 모선명/항차 합산 적용
   const displayRows = useMemo(() => {
@@ -341,6 +388,34 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
     if (!mergeEnabled || !hasSorts || displayRows.length === 0) return null
     return buildHierarchicalSpans(displayRows)
   }, [displayRows, mergeEnabled, hasSorts])
+
+  // ── 범위 선택 + 복사 (엑셀형) ────────────────────────────────────
+  const selRange = useMemo(() => {
+    if (!selAnchor || !selFocus) return null
+    return {
+      r1: Math.min(selAnchor.r, selFocus.r), r2: Math.max(selAnchor.r, selFocus.r),
+      c1: Math.min(selAnchor.c, selFocus.c), c2: Math.max(selAnchor.c, selFocus.c),
+    }
+  }, [selAnchor, selFocus])
+
+  const copySelection = async () => {
+    if (!selRange) return
+    const lines: string[] = []
+    for (let r = selRange.r1; r <= selRange.r2; r++) {
+      const row = displayRows[r]
+      if (!row) continue
+      const cells: string[] = []
+      for (let c = selRange.c1; c <= selRange.c2; c++) {
+        const col = selectedCols[c]
+        cells.push(col && !isSpacerCol(col) ? getCellValue(row, col, customColumns) : '')
+      }
+      lines.push(cells.join('\t'))
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'))
+      setRangeCopied(true); setTimeout(() => setRangeCopied(false), 1500)
+    } catch {}
+  }
 
   const exportToExcel = () => {
     import('xlsx').then((XLSX) => {
@@ -547,19 +622,88 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
       {/* 미리보기 테이블 */}
       {displayRows.length > 0 && selectedCols.length > 0 ? (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-            <span className="text-xs font-medium text-gray-600">미리보기</span>
-            <span className="text-xs text-gray-400">{displayRows.length}건{voyageMerge && filtered.length !== displayRows.length ? ` (합산 전 ${filtered.length}건)` : ''}</span>
+          <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600">미리보기</span>
+              <span className="text-[11px] text-gray-400">셀 드래그 선택 → Ctrl+C 복사 · 열 제목 클릭 정렬 · ▼ 필터</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {selRange && (
+                <button onClick={copySelection}
+                  className={`text-xs px-2.5 py-1 rounded font-medium transition-colors ${rangeCopied ? 'bg-green-500 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                  {rangeCopied ? '✓ 복사됨' : '선택범위 복사'}
+                </button>
+              )}
+              {Object.keys(colFilters).length > 0 && (
+                <button onClick={() => setColFilters({})}
+                  className="text-xs px-2.5 py-1 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 font-medium transition-colors">
+                  필터 {Object.keys(colFilters).length}개 해제
+                </button>
+              )}
+              <span className="text-xs text-gray-400">{displayRows.length}건{voyageMerge && filtered.length !== displayRows.length ? ` (합산 전 ${filtered.length}건)` : ''}</span>
+            </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto outline-none" tabIndex={0}
+            onKeyDown={e => {
+              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && selRange) { e.preventDefault(); copySelection() }
+              if (e.key === 'Escape') { setSelAnchor(null); setSelFocus(null); setOpenFilterCol(null) }
+            }}>
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="bg-gray-50 border-b-2 border-gray-300">
-                  {selectedCols.map(col => (
-                    <th key={col} className={`text-center px-3 py-2 font-semibold whitespace-nowrap border-r border-gray-200 last:border-0 ${isSpacerCol(col) ? 'text-gray-200 w-8' : 'text-gray-600'}`}>
-                      {isSpacerCol(col) ? '' : (allLabels[col] || col)}
-                    </th>
-                  ))}
+                  {selectedCols.map(col => {
+                    const ind = sortIndicator(col)
+                    const hasFilter = Array.isArray(colFilters[col])
+                    return (
+                      <th key={col} className={`relative text-center px-3 py-2 font-semibold whitespace-nowrap border-r border-gray-200 last:border-0 ${isSpacerCol(col) ? 'text-gray-200 w-8' : 'text-gray-600'}`}>
+                        {!isSpacerCol(col) && (
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => handleHeaderSort(col)}
+                              className="hover:text-blue-600 transition-colors flex items-center gap-0.5"
+                              title="클릭: 오름차순 → 내림차순 → 해제 (1차 정렬)">
+                              {allLabels[col] || col}
+                              {ind && <span className="text-blue-600 font-bold">{ind.dir === 'asc' ? '↑' : '↓'}{ind.level > 1 ? ind.level : ''}</span>}
+                            </button>
+                            <button onClick={() => { setFilterSearch(''); setOpenFilterCol(openFilterCol === col ? null : col) }}
+                              className={`text-[10px] leading-none px-1 py-0.5 rounded transition-colors ${hasFilter ? 'text-white bg-blue-500' : 'text-gray-300 hover:text-gray-500 hover:bg-gray-100'}`}
+                              title="필터">▼</button>
+                          </div>
+                        )}
+                        {openFilterCol === col && !isSpacerCol(col) && (
+                          <>
+                            <div className="fixed inset-0 z-40 cursor-default" onClick={() => setOpenFilterCol(null)} />
+                            <div className="absolute top-full left-1/2 -translate-x-1/2 z-50 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-xl p-2 text-left font-normal">
+                              <input value={filterSearch} onChange={e => setFilterSearch(e.target.value)} placeholder="검색" autoFocus
+                                className="w-full border border-gray-200 rounded px-2 py-1 text-xs mb-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                              <div className="flex gap-1 mb-1.5">
+                                <button onClick={() => { setColFilters(p => { const n = { ...p }; delete n[col]; return n }) }}
+                                  className="flex-1 text-[11px] px-1.5 py-1 bg-gray-100 rounded hover:bg-gray-200 transition-colors">전체 선택</button>
+                                <button onClick={() => setColFilters(p => ({ ...p, [col]: [] }))}
+                                  className="flex-1 text-[11px] px-1.5 py-1 bg-gray-100 rounded hover:bg-gray-200 transition-colors">모두 해제</button>
+                              </div>
+                              <div className="max-h-44 overflow-y-auto space-y-0.5">
+                                {filterOptions.filter(v => (v || '(빈 값)').toLowerCase().includes(filterSearch.toLowerCase())).map(v => {
+                                  const checked = !colFilters[col] || colFilters[col].includes(v)
+                                  return (
+                                    <label key={v || '__empty__'} className="flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+                                      <input type="checkbox" checked={checked} onChange={() => {
+                                        setColFilters(prev => {
+                                          const cur = prev[col] ?? filterOptions
+                                          const next = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v]
+                                          return { ...prev, [col]: next }
+                                        })
+                                      }} className="rounded" />
+                                      <span className="text-xs text-gray-700 truncate">{v || '(빈 값)'}</span>
+                                    </label>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </th>
+                    )
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -569,14 +713,23 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
 
                   return (
                     <tr key={booking.id} className={`border-b border-gray-200 ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
-                      {selectedCols.map(col => {
+                      {selectedCols.map((col, colIdx) => {
                         const span = rowSpanMap ? (rowSpanMap[col]?.[rowIdx] ?? 1) : 1
                         if (span === 0) return null
                         const value = getCellValue(booking, col, customColumns)
+                        const inSel = selRange && rowIdx >= selRange.r1 && rowIdx <= selRange.r2 && colIdx >= selRange.c1 && colIdx <= selRange.c2
                         return (
                           <td key={col}
                             rowSpan={span > 1 ? span : undefined}
-                            className={`px-3 py-2 text-gray-700 border-r border-gray-200 last:border-0 whitespace-nowrap text-center align-middle ${span > 1 ? 'bg-blue-50/60 font-semibold' : ''}`}
+                            onMouseDown={e => {
+                              if (e.button !== 0) return
+                              e.preventDefault()
+                              draggingRef.current = true
+                              setSelAnchor({ r: rowIdx, c: colIdx }); setSelFocus({ r: rowIdx, c: colIdx })
+                              ;(e.currentTarget.closest('[tabindex]') as HTMLElement | null)?.focus()
+                            }}
+                            onMouseEnter={() => { if (draggingRef.current) setSelFocus({ r: rowIdx, c: colIdx }) }}
+                            className={`px-3 py-2 text-gray-700 border-r border-gray-200 last:border-0 whitespace-nowrap text-center align-middle cursor-cell select-none ${inSel ? 'bg-blue-100/80 ring-1 ring-inset ring-blue-300' : span > 1 ? 'bg-blue-50/60 font-semibold' : ''}`}
                             style={span > 1 ? { borderBottom: '2px solid #93c5fd', borderTop: '2px solid #93c5fd' } : undefined}>
                             {value || <span className="text-gray-300">-</span>}
                           </td>

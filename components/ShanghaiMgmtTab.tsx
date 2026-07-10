@@ -65,16 +65,18 @@ function toExcelDate(d: string | null | undefined): Date | string {
 type LocalRow = {
   key: string
   booking_seq_no: number | null
+  prev_port: string         // 직전 PORT (수동)
   first_departure: string   // F
   current_departure: string // G
   berthing: string          // K (접안일 수동)
   mqc: string               // O MQC(/WK) (수동)
   secured_space: string     // P 확보선복 (수동 — 부킹 원본에 반영)
+  remarks: string           // 비고 (수동)
 }
 
 type EditField = keyof Omit<LocalRow, 'key' | 'booking_seq_no'>
 // 수동 편집 열 순서 (엑셀형 이동/붙여넣기 기준)
-const EDITABLE: EditField[] = ['first_departure', 'current_departure', 'berthing', 'mqc', 'secured_space']
+const EDITABLE: EditField[] = ['prev_port', 'first_departure', 'current_departure', 'berthing', 'mqc', 'secured_space', 'remarks']
 // 날짜 자동정규화 대상 (MQC·확보선복은 숫자라 제외)
 const DATE_FIELDS = new Set<EditField>(['first_departure', 'current_departure', 'berthing'])
 
@@ -108,6 +110,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
       return {
         key: r.id,
         booking_seq_no: r.booking_seq_no,
+        prev_port: r.prev_port || '',
         first_departure: r.first_departure || '',
         current_departure: r.current_departure || '',
         berthing: r.berthing || '',
@@ -115,6 +118,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
         mqc: r.mqc || (bk?.mqc || ''),
         // 확보선복: 부킹값, 없으면 실마감물량
         secured_space: securedDefault(bk),
+        remarks: r.remarks || '',
       }
     })
   )
@@ -189,13 +193,13 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
       // 도착지 기본값 있으면 우선, 없으면 부킹 자체 MQC
       const dest = bk?.final_destination || ''
       const mqcInit = mqcDefaults[dest] || bk?.mqc || ''
-      additions.push({ key: nextKey(), booking_seq_no: n, first_departure: '', current_departure: '', berthing: '', mqc: mqcInit, secured_space: securedDefault(bk) })
+      additions.push({ key: nextKey(), booking_seq_no: n, prev_port: '', first_departure: '', current_departure: '', berthing: '', mqc: mqcInit, secured_space: securedDefault(bk), remarks: '' })
     }
     if (additions.length > 0) setRows(prev => [...prev, ...additions])
     setNotFound(missing)
     setInput('')
   }
-  const addBlankRow = () => setRows(prev => [...prev, { key: nextKey(), booking_seq_no: null, first_departure: '', current_departure: '', berthing: '', mqc: '', secured_space: '' }])
+  const addBlankRow = () => setRows(prev => [...prev, { key: nextKey(), booking_seq_no: null, prev_port: '', first_departure: '', current_departure: '', berthing: '', mqc: '', secured_space: '', remarks: '' }])
   const updateRow = (key: string, field: EditField, value: string) =>
     setRows(prev => prev.map(r => r.key === key ? { ...r, [field]: value } : r))
 
@@ -216,6 +220,45 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
     }
     return Array.from(s).sort()
   }, [rows, bySeq])
+
+  // ── PROFORMA ETD 기준 일괄 추가 ─────────────────────────────────
+  const [etdAddFrom, setEtdAddFrom] = useState('')
+  const [etdAddTo, setEtdAddTo] = useState('')
+  // 기간 내 PROFORMA ETD인 부킹 중 아직 추가되지 않은 건
+  const etdCandidates = useMemo(() => {
+    if (!etdAddFrom && !etdAddTo) return []
+    const existing = new Set(rows.map(r => r.booking_seq_no).filter(v => v != null) as number[])
+    return bookings
+      .filter(b => {
+        if (b.seq_no == null || existing.has(b.seq_no)) return false
+        const etd = b.proforma_etd
+        if (!etd) return false
+        if (etdAddFrom && etd < etdAddFrom) return false
+        if (etdAddTo && etd > etdAddTo) return false
+        return true
+      })
+      .sort((a, b) => {
+        const ea = a.proforma_etd || '', eb = b.proforma_etd || ''
+        if (ea !== eb) return ea < eb ? -1 : 1
+        return (a.seq_no || 0) - (b.seq_no || 0)
+      })
+  }, [rows, bookings, etdAddFrom, etdAddTo])
+
+  const handleEtdAdd = () => {
+    if (etdCandidates.length === 0) return
+    // 도착지별 MQC 기본값·확보선복 기본값 자동 적용, 맨 마지막에 추가
+    setRows(prev => [...prev, ...etdCandidates.map(bk => ({
+      key: nextKey(),
+      booking_seq_no: bk.seq_no as number,
+      prev_port: '',
+      first_departure: '',
+      current_departure: '',
+      berthing: '',
+      mqc: mqcDefaults[bk.final_destination || ''] || bk.mqc || '',
+      secured_space: securedDefault(bk),
+      remarks: '',
+    }))])
+  }
   const removeRow = (key: string) => setRows(prev => prev.filter(r => r.key !== key))
   const moveRow = (idx: number, dir: -1 | 1) => setRows(prev => {
     const next = [...prev]; const j = idx + dir
@@ -240,10 +283,12 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
       const result = await saveShanghaiMgmt(
         rows.map(r => ({
           booking_seq_no: r.booking_seq_no,
+          prev_port: r.prev_port,
           first_departure: r.first_departure,
           current_departure: r.current_departure,
           berthing: r.berthing,
           mqc: r.mqc,
+          remarks: r.remarks,
         })),
         securedUpdates,
       )
@@ -261,12 +306,13 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
       const XLSX = (mod as unknown as { default: typeof import('xlsx-js-style') }).default ?? mod
       const N = rows.length
 
-      const groupRow = ['법인', '법인/대리점', '도착지', '선사', '선명 & VOYAGE',
+      // 열 배치(0~18): 법인/대리점/도착지/직전PORT/선사/선명&VOY | 상해(6~8) | 부산(9~14) | MQC/확보/실마감/비고
+      const groupRow = ['법인', '법인/대리점', '도착지', '직전 PORT', '선사', '선명 & VOYAGE',
         '상해 / 닝보(PUS 직전 PORT 기준)', '', '', '부산', '', '', '', '', '',
-        'MQC (/WK)', '확보 선복', '실 마감 물량']
-      const subRow = ['', '', '', '', '', '최초 출항일', '현재 출항일', '지연일',
-        '부산출항(최초)', '부산출항(현재 ETD)', '접안일', '지연일', '서류마감', 'P.O.D ETA', '', '', '']
-      const titleRow = [TITLE, ...Array(16).fill('')]
+        'MQC (/WK)', '확보 선복', '실 마감 물량', '비고']
+      const subRow = ['', '', '', '', '', '', '최초 출항일', '현재 출항일', '지연일',
+        '부산출항(최초)', '부산출항(현재 ETD)', '접안일', '지연일', '서류마감', 'P.O.D ETA', '', '', '', '']
+      const titleRow = [TITLE, ...Array(18).fill('')]
 
       const delayNums: { h: number | null; l: number | null }[] = []
       const dataRows = rows.map(r => {
@@ -276,12 +322,12 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
         delayNums.push({ h, l })
         return [
           'MPA', 'MPA',
-          b?.final_destination || '', b?.carrier || '', vesselVoyage(b),
+          b?.final_destination || '', r.prev_port || '', b?.carrier || '', vesselVoyage(b),
           r.first_departure, r.current_departure, h ?? '',
           toExcelDate(b?.proforma_etd), toExcelDate(b?.updated_etd), r.berthing,
           l ?? '',
           toExcelDate(b?.doc_cutoff_date), toExcelDate(b?.eta),
-          r.mqc || '', r.secured_space || '', b ? (calcTotalQty(b) || '') : '',
+          r.mqc || '', r.secured_space || '', b ? (calcTotalQty(b) || '') : '', r.remarks || '',
         ]
       })
 
@@ -307,11 +353,11 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
         ...(opts.date ? { numFmt: 'mm"월" dd"일"' } : {}),
       })
 
-      const orangeCols = new Set([14, 15, 16])
-      for (let c = 0; c <= 16; c++) {
+      const orangeCols = new Set([15, 16, 17, 18])
+      for (let c = 0; c <= 18; c++) {
         const gAddr = XLSX.utils.encode_cell({ r: 1, c })
         const sAddr = XLSX.utils.encode_cell({ r: 2, c })
-        if (ws[gAddr]) ws[gAddr].s = (c >= 5 && c <= 7) ? groupShanghai : (c >= 8 && c <= 13) ? groupBusan : orangeCols.has(c) ? orangeHeader : navyHeader
+        if (ws[gAddr]) ws[gAddr].s = (c >= 6 && c <= 8) ? groupShanghai : (c >= 9 && c <= 14) ? groupBusan : orangeCols.has(c) ? orangeHeader : navyHeader
         if (ws[sAddr]) ws[sAddr].s = navyHeader
       }
       const tAddr = XLSX.utils.encode_cell({ r: 0, c: 0 })
@@ -319,23 +365,23 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
 
       for (let ri = 0; ri < N; ri++) {
         const { h, l } = delayNums[ri]
-        for (let c = 0; c <= 16; c++) {
+        for (let c = 0; c <= 18; c++) {
           const addr = XLSX.utils.encode_cell({ r: ri + 3, c })
           if (!ws[addr]) ws[addr] = { t: 's', v: '' }
-          const isDate = [8, 9, 12, 13].includes(c)
-          const delayCell = (c === 7 && (h ?? 0) > 0) || (c === 11 && (l ?? 0) > 0)
+          const isDate = [9, 10, 13, 14].includes(c)
+          const delayCell = (c === 8 && (h ?? 0) > 0) || (c === 12 && (l ?? 0) > 0)
           ws[addr].s = dataBase({ delay: delayCell, date: isDate })
         }
       }
 
       const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: 16 } },
-        { s: { r: 1, c: 5 }, e: { r: 1, c: 7 } },
-        { s: { r: 1, c: 8 }, e: { r: 1, c: 13 } },
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 18 } },
+        { s: { r: 1, c: 6 }, e: { r: 1, c: 8 } },
+        { s: { r: 1, c: 9 }, e: { r: 1, c: 14 } },
       ]
-      for (const c of [0, 1, 2, 3, 4, 14, 15, 16]) merges.push({ s: { r: 1, c }, e: { r: 2, c } })
+      for (const c of [0, 1, 2, 3, 4, 5, 15, 16, 17, 18]) merges.push({ s: { r: 1, c }, e: { r: 2, c } })
       if (N > 1) merges.push({ s: { r: 3, c: 0 }, e: { r: 3 + N - 1, c: 0 } })
-      for (const c of [2, 3]) {
+      for (const c of [2, 4]) {
         let i = 0
         while (i < N) {
           const b = rows[i].booking_seq_no != null ? bySeq.get(rows[i].booking_seq_no!) : undefined
@@ -353,7 +399,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
         }
       }
       ws['!merges'] = merges
-      ws['!cols'] = [6, 10, 16, 12, 18, 11, 11, 7, 12, 14, 12, 7, 11, 11, 9, 9, 11].map(w => ({ wch: w }))
+      ws['!cols'] = [6, 10, 16, 10, 12, 18, 11, 11, 7, 12, 14, 12, 7, 11, 11, 9, 9, 11, 16].map(w => ({ wch: w }))
       ws['!rows'] = [{ hpt: 26 }, { hpt: 18 }, { hpt: 30 }]
 
       const wb = XLSX.utils.book_new()
@@ -406,6 +452,30 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
             <p className="text-xs text-yellow-700">고유번호를 찾을 수 없습니다: <span className="font-mono font-medium">{notFound.join(', ')}</span></p>
           </div>
         )}
+      </div>
+
+      {/* PROFORMA ETD 기준 일괄 추가 */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
+        <div>
+          <label className="text-xs text-gray-500 block font-medium">PROFORMA ETD 기준 일괄 추가</label>
+          <p className="text-xs text-gray-400 mt-0.5">기간 내 PROFORMA ETD인 부킹 중 <b>아직 추가되지 않은 건</b>을 표 맨 아래에 추가합니다. (도착지별 MQC 기본값·확보선복 기본값 자동 적용)</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input type="date" value={etdAddFrom} onChange={e => setEtdAddFrom(e.target.value)}
+            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          <span className="text-gray-400 text-xs">~</span>
+          <input type="date" value={etdAddTo} onChange={e => setEtdAddTo(e.target.value)}
+            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          <button onClick={handleEtdAdd} disabled={etdCandidates.length === 0}
+            className="px-3 py-1.5 bg-emerald-600 text-white text-xs rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors font-medium">
+            {etdCandidates.length > 0 ? `${etdCandidates.length}건 추가` : '추가할 건 없음'}
+          </button>
+          {(etdAddFrom || etdAddTo) && etdCandidates.length > 0 && (
+            <span className="text-[11px] text-gray-400">
+              고유번호: {etdCandidates.slice(0, 10).map(b => b.seq_no).join(', ')}{etdCandidates.length > 10 ? ` 외 ${etdCandidates.length - 10}건` : ''}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* 도착지별 MQC 기본값 일괄설정 */}
@@ -465,6 +535,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
                   <th rowSpan={2} className={`${th} ${thNavy}`}>법인</th>
                   <th rowSpan={2} className={`${th} ${thNavy}`}>법인/<br />대리점</th>
                   <th rowSpan={2} className={`${th} ${thNavy}`}>도착지</th>
+                  <th rowSpan={2} className={`${th} ${thNavy}`}>직전<br />PORT</th>
                   <th rowSpan={2} className={`${th} ${thNavy}`}>선사</th>
                   <th rowSpan={2} className={`${th} ${thNavy}`}>선명 &<br />VOYAGE</th>
                   <th colSpan={3} className={`${th} bg-[#C55A11]`}>상해 / 닝보(PUS 직전 PORT 기준)</th>
@@ -472,6 +543,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
                   <th rowSpan={2} className={`${th} ${thOrange}`}>MQC<br />(/WK)</th>
                   <th rowSpan={2} className={`${th} ${thOrange}`}>확보<br />선복</th>
                   <th rowSpan={2} className={`${th} ${thOrange}`}>실 마감<br />물량</th>
+                  <th rowSpan={2} className={`${th} ${thOrange}`}>비고</th>
                   <th rowSpan={2} className={`${th} bg-gray-400`}>삭제</th>
                 </tr>
                 <tr>
@@ -509,8 +581,19 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
                       {/* A,B 고정 */}
                       <td className={`${td} font-semibold text-gray-600 bg-slate-50`}>MPA</td>
                       <td className={`${td} font-semibold text-gray-600 bg-slate-50`}>MPA</td>
-                      {/* C,D 자동 */}
+                      {/* C 도착지 자동 */}
                       <td className={`${td} text-gray-800`}>{b?.final_destination || dash}</td>
+                      {/* 직전 PORT (수동) */}
+                      <td className="px-1 py-1 border border-gray-200 bg-sky-50/30">
+                        <input value={r.prev_port}
+                          ref={el => { inputRefs.current[`${idx}:prev_port`] = el }}
+                          onChange={e => updateRow(r.key, 'prev_port', e.target.value)}
+                          onKeyDown={e => handleNav(e, idx, 'prev_port')}
+                          onPaste={e => handleCellPaste(e, idx, 'prev_port')}
+                          placeholder="직전 PORT"
+                          className="w-20 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-sky-400 bg-white" />
+                      </td>
+                      {/* D 선사 자동 */}
                       <td className={`${td} text-gray-700`}>{b?.carrier || dash}</td>
                       {/* E 선명 & VOYAGE 자동 */}
                       <td className={`${td} text-gray-700`}>{vesselVoyage(b) || dash}</td>
@@ -564,6 +647,16 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
                       </td>
                       {/* Q 실마감물량 (자동) */}
                       <td className={`${td} font-semibold text-blue-700`}>{b ? (calcTotalQty(b) || dash) : dash}</td>
+                      {/* 비고 (수동) */}
+                      <td className="px-1 py-1 border border-gray-200">
+                        <input value={r.remarks}
+                          ref={el => { inputRefs.current[`${idx}:remarks`] = el }}
+                          onChange={e => updateRow(r.key, 'remarks', e.target.value)}
+                          onKeyDown={e => handleNav(e, idx, 'remarks')}
+                          onPaste={e => handleCellPaste(e, idx, 'remarks')}
+                          placeholder="비고"
+                          className="w-28 border border-gray-200 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white" />
+                      </td>
                       {/* 삭제 */}
                       <td className={td}><button onClick={() => removeRow(r.key)} className="text-gray-300 hover:text-red-500 transition-colors">✕</button></td>
                     </tr>

@@ -217,10 +217,12 @@ export async function signOut() {
 
 export type ShanghaiRowInput = {
   booking_seq_no: number | null
+  prev_port: string         // 직전 PORT
   first_departure: string   // F 최초 출항일
   current_departure: string // G 현재 출항일
   berthing: string          // K 접안일
   mqc: string               // O MQC(/WK)
+  remarks: string           // 비고
 }
 
 export async function saveShanghaiMgmt(
@@ -255,9 +257,10 @@ export async function saveShanghaiMgmt(
       current_departure: r.current_departure || '',
     }))
     const withBerthing = base.map((b, i) => ({ ...b, berthing: rows[i].berthing || '' }))
-    const withAll = withBerthing.map((b, i) => ({ ...b, mqc: rows[i].mqc || '' }))
+    const withMqc = withBerthing.map((b, i) => ({ ...b, mqc: rows[i].mqc || '' }))
+    const withAll = withMqc.map((b, i) => ({ ...b, prev_port: rows[i].prev_port || '', remarks: rows[i].remarks || '' }))
     // 신규 컬럼 미적용 마이그레이션 상태도 안전하게 — 단계적으로 폴백
-    const candidates = [withAll, withBerthing, base]
+    const candidates = [withAll, withMqc, withBerthing, base]
     let insErr: { message: string } | null = null
     for (const payload of candidates) {
       const res = await supabase.from('shanghai_mgmt').insert(payload)
