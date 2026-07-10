@@ -24,6 +24,7 @@ export default async function BookingsPage() {
     { data: destSortSetting },
     { data: shanghaiRows },
     { data: seqRows },
+    { data: prevPortsSetting },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -42,6 +43,7 @@ export default async function BookingsPage() {
     supabase.from('shanghai_mgmt').select('*').order('sort_order').order('created_at'),
     // seq_no(고유번호)는 별도 조회로 병합 — 마이그레이션 미적용 시에도 부킹장이 깨지지 않도록 방어
     supabase.from('bookings').select('id, seq_no'),
+    supabase.from('global_settings').select('value').eq('key', 'shanghai_prev_ports').single(),
   ])
 
   // seq_no 병합 (컬럼 없거나 오류 시 무시)
@@ -70,6 +72,7 @@ export default async function BookingsPage() {
       baseColLabels={(baseColLabelsSetting?.value as Record<string, string> | null) || {}}
       destinationSortOrder={(destSortSetting?.value as string[] | null) || []}
       shanghaiRows={(shanghaiRows || []) as ShanghaiMgmtRow[]}
+      shanghaiPrevPorts={(prevPortsSetting?.value as string[] | null) || []}
     />
   )
 }

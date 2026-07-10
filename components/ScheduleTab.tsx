@@ -398,9 +398,12 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
     }
   }, [selAnchor, selFocus])
 
-  const copySelection = async () => {
-    if (!selRange) return
+  // 선택범위 → TSV + HTML (엑셀 붙여넣기 호환)
+  const buildSelectionData = () => {
+    if (!selRange) return null
+    const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     const lines: string[] = []
+    const htmlRows: string[] = []
     for (let r = selRange.r1; r <= selRange.r2; r++) {
       const row = displayRows[r]
       if (!row) continue
@@ -410,9 +413,43 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
         cells.push(col && !isSpacerCol(col) ? getCellValue(row, col, customColumns) : '')
       }
       lines.push(cells.join('\t'))
+      htmlRows.push('<tr>' + cells.map(v => `<td>${esc(v || '')}</td>`).join('') + '</tr>')
     }
+    if (lines.length === 0) return null
+    return { plain: lines.join('\n'), html: `<table>${htmlRows.join('')}</table>` }
+  }
+  const buildRef = useRef(buildSelectionData)
+  buildRef.current = buildSelectionData
+
+  // Ctrl+C: 네이티브 copy 이벤트에 데이터 직접 주입 (포커스·클립보드 권한 이슈 없음)
+  useEffect(() => {
+    const onCopy = (e: ClipboardEvent) => {
+      const ae = document.activeElement
+      if (ae && ['INPUT', 'TEXTAREA', 'SELECT'].includes(ae.tagName)) return // 입력창 복사는 기본 동작
+      const data = buildRef.current()
+      if (!data) return
+      e.preventDefault()
+      e.clipboardData?.setData('text/plain', data.plain)
+      e.clipboardData?.setData('text/html', data.html)
+      setRangeCopied(true); setTimeout(() => setRangeCopied(false), 1500)
+    }
+    document.addEventListener('copy', onCopy)
+    return () => document.removeEventListener('copy', onCopy)
+  }, [])
+
+  // 버튼 클릭 복사
+  const copySelection = async () => {
+    const data = buildRef.current()
+    if (!data) return
     try {
-      await navigator.clipboard.writeText(lines.join('\n'))
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/plain': new Blob([data.plain], { type: 'text/plain' }),
+          'text/html': new Blob([data.html], { type: 'text/html' }),
+        })])
+      } else {
+        await navigator.clipboard.writeText(data.plain)
+      }
       setRangeCopied(true); setTimeout(() => setRangeCopied(false), 1500)
     } catch {}
   }
@@ -645,7 +682,6 @@ export default function ScheduleTab({ bookings, customColumns, initialScheduleCo
           </div>
           <div className="overflow-x-auto outline-none" tabIndex={0}
             onKeyDown={e => {
-              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && selRange) { e.preventDefault(); copySelection() }
               if (e.key === 'Escape') { setSelAnchor(null); setSelFocus(null); setOpenFilterCol(null) }
             }}>
             <table className="w-full text-xs border-collapse">

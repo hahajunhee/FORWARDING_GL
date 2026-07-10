@@ -170,6 +170,22 @@ export async function bulkSaveBookings(
   return { errors }
 }
 
+// ── 상해발관리 직전 PORT 목록 저장 (전체 공유) ──────────────────────
+
+export async function saveShanghaiPrevPorts(ports: string[]): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'shanghai_prev_ports', value: ports })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 // ── 일괄 삭제 ──────────────────────────────────────────────────────
 
 export async function bulkDeleteBookings(ids: string[]): Promise<{ error: string | null }> {

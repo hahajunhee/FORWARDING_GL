@@ -28,6 +28,7 @@ interface Props {
   baseColLabels?: Record<string, string>
   destinationSortOrder?: string[]
   shanghaiRows?: ShanghaiMgmtRow[]
+  shanghaiPrevPorts?: string[]
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -92,7 +93,7 @@ const MASTER_EMAIL = 'hahajunhee@glovis.net'
 
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns, initialScheduleCols,
-  regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [], shanghaiRows = [],
+  regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [], shanghaiRows = [], shanghaiPrevPorts = [],
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -260,7 +261,7 @@ export default function BookingPageLayout({
                 <h2 className="text-lg font-bold text-gray-900">상해발관리</h2>
                 <p className="text-sm text-gray-500">부킹장의 고유번호로 집중관리 대상을 추가하고, MPA 주요 PDC 스케줄 현황 보고서를 Excel로 다운로드합니다.</p>
               </div>
-              <ShanghaiMgmtTab bookings={bookings} initialRows={shanghaiRows} />
+              <ShanghaiMgmtTab bookings={bookings} initialRows={shanghaiRows} initialPrevPorts={shanghaiPrevPorts} />
             </div>
           )}
         </main>

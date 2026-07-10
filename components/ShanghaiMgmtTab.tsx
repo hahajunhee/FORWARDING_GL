@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { format, parseISO, isValid, differenceInCalendarDays } from 'date-fns'
 import type { Booking, ShanghaiMgmtRow } from '@/types'
 import { calcTotalQty } from './BookingTable'
-import { saveShanghaiMgmt } from '@/app/bookings/actions'
+import { saveShanghaiMgmt, saveShanghaiPrevPorts } from '@/app/bookings/actions'
 
 const TITLE = '▶ 모비스 AS) MPA 주요 PDC 스케줄 현황 보고'
 
@@ -91,9 +91,10 @@ function securedDefault(b?: Booking): string {
 interface Props {
   bookings: Booking[]
   initialRows: ShanghaiMgmtRow[]
+  initialPrevPorts?: string[]
 }
 
-export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
+export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPorts = [] }: Props) {
   const router = useRouter()
   const bySeq = useMemo(() => {
     const m = new Map<number, Booking>()
@@ -224,8 +225,9 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
   // ── PROFORMA ETD 기준 일괄 추가 ─────────────────────────────────
   const [etdAddFrom, setEtdAddFrom] = useState('')
   const [etdAddTo, setEtdAddTo] = useState('')
-  // 기간 내 PROFORMA ETD인 부킹 중 아직 추가되지 않은 건
-  const etdCandidates = useMemo(() => {
+  const [etdAddDests, setEtdAddDests] = useState<string[]>([]) // 빈 배열 = 전체 도착지
+  // 기간 내 PROFORMA ETD인 부킹 중 아직 추가되지 않은 건 (도착지 필터 전)
+  const etdPeriodCandidates = useMemo(() => {
     if (!etdAddFrom && !etdAddTo) return []
     const existing = new Set(rows.map(r => r.booking_seq_no).filter(v => v != null) as number[])
     return bookings
@@ -243,6 +245,16 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
         return (a.seq_no || 0) - (b.seq_no || 0)
       })
   }, [rows, bookings, etdAddFrom, etdAddTo])
+  // 기간 내 후보의 도착지 목록 (선택 칩용)
+  const etdDestOptions = useMemo(() =>
+    Array.from(new Set(etdPeriodCandidates.map(b => b.final_destination || '').filter(Boolean))).sort()
+  , [etdPeriodCandidates])
+  // 도착지 필터 적용된 최종 후보
+  const etdCandidates = useMemo(() =>
+    etdAddDests.length === 0
+      ? etdPeriodCandidates
+      : etdPeriodCandidates.filter(b => etdAddDests.includes(b.final_destination || ''))
+  , [etdPeriodCandidates, etdAddDests])
 
   const handleEtdAdd = () => {
     if (etdCandidates.length === 0) return
@@ -259,6 +271,65 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
       remarks: '',
     }))])
   }
+
+  // ── 열 제목 클릭 정렬 (행 순서를 실제로 재배치 → 저장 시 그 순서로 영속) ──
+  const [sortState, setSortState] = useState<{ key: string; dir: 1 | -1 } | null>(null)
+  const sortVal = (r: LocalRow, key: string): string | number => {
+    const b = r.booking_seq_no != null ? bySeq.get(r.booking_seq_no) : undefined
+    const num = (s: string) => { const n = parseFloat(s); return isNaN(n) ? s : n }
+    switch (key) {
+      case 'seq':         return r.booking_seq_no ?? ''
+      case 'dest':        return b?.final_destination || ''
+      case 'prev_port':   return r.prev_port
+      case 'carrier':     return b?.carrier || ''
+      case 'vessel':      return vesselVoyage(b)
+      case 'first_dep':   return kToISO(r.first_departure)
+      case 'cur_dep':     return kToISO(r.current_departure)
+      case 'delay_sh':    return diffDaysK(r.first_departure, r.current_departure) ?? ''
+      case 'busan_first': return b?.proforma_etd || ''
+      case 'busan_cur':   return b?.updated_etd || ''
+      case 'berthing':    return kToISO(r.berthing)
+      case 'delay_bs':    return busanDelay(b) ?? ''
+      case 'doc_cutoff':  return b?.doc_cutoff_date || ''
+      case 'eta':         return b?.eta || ''
+      case 'mqc':         return num(r.mqc)
+      case 'secured':     return num(r.secured_space)
+      case 'qty':         return b ? calcTotalQty(b) : ''
+      case 'remarks':     return r.remarks
+      default:            return ''
+    }
+  }
+  const handleSort = (key: string) => {
+    const dir: 1 | -1 = sortState?.key === key && sortState.dir === 1 ? -1 : 1
+    setSortState({ key, dir })
+    setRows(prev => [...prev].sort((a, b) => {
+      const va = sortVal(a, key), vb = sortVal(b, key)
+      const ea = va === '' || va == null, eb = vb === '' || vb == null
+      if (ea && eb) return 0
+      if (ea) return 1  // 빈 값은 항상 아래로
+      if (eb) return -1
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
+      return String(va).localeCompare(String(vb), 'ko') * dir
+    }))
+  }
+  const arrow = (key: string) => sortState?.key === key ? (sortState.dir === 1 ? ' ↑' : ' ↓') : ''
+
+  // ── 직전 PORT 목록 (전체 공유, 유저가 직접 관리) ─────────────────
+  const [prevPorts, setPrevPorts] = useState<string[]>(initialPrevPorts)
+  const [newPort, setNewPort] = useState('')
+  const [portSaving, setPortSaving] = useState(false)
+  const savePortList = (next: string[]) => {
+    setPrevPorts(next)
+    setPortSaving(true)
+    saveShanghaiPrevPorts(next).finally(() => setPortSaving(false))
+  }
+  const addPrevPort = () => {
+    const v = newPort.trim()
+    if (!v || prevPorts.includes(v)) { setNewPort(''); return }
+    savePortList([...prevPorts, v].sort())
+    setNewPort('')
+  }
+  const removePrevPort = (p: string) => savePortList(prevPorts.filter(x => x !== p))
   const removeRow = (key: string) => setRows(prev => prev.filter(r => r.key !== key))
   const moveRow = (idx: number, dir: -1 | 1) => setRows(prev => {
     const next = [...prev]; const j = idx + dir
@@ -416,6 +487,11 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* 직전 PORT 목록상자 옵션 (전체 공유) */}
+      <datalist id="shanghai-prev-ports">
+        {prevPorts.map(p => <option key={p} value={p} />)}
+      </datalist>
+
       {/* 작성방법 안내 */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-2">
         <h3 className="text-sm font-bold text-blue-900">📌 작성방법</h3>
@@ -428,6 +504,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
           · 날짜 셀은 <b>0807</b>처럼 입력하면 <b>08월 07일</b>로 자동 변환됩니다 (📅 아이콘으로 달력 선택도 가능).
           · <b>지연일</b>은 자동 계산됩니다 — 상해=현재출항일−최초출항일, 부산=부산출항(현재 ETD)−부산출항(최초).
           · <b>Enter/Tab/방향키</b>로 셀 이동, 엑셀에서 복사한 값 <b>붙여넣기(Ctrl+V)</b> 지원.
+          · <b>열 제목 클릭</b>으로 정렬 — 저장하면 그 순서 그대로 유지됩니다.
         </p>
       </div>
 
@@ -475,6 +552,50 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
               고유번호: {etdCandidates.slice(0, 10).map(b => b.seq_no).join(', ')}{etdCandidates.length > 10 ? ` 외 ${etdCandidates.length - 10}건` : ''}
             </span>
           )}
+        </div>
+        {/* 도착지 선택 (기간 내 후보 기준) */}
+        {etdDestOptions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-gray-400 flex-shrink-0">도착지 선택:</span>
+            <button onClick={() => setEtdAddDests([])}
+              className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${etdAddDests.length === 0 ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-500 border-gray-200 hover:border-emerald-400'}`}>
+              전체
+            </button>
+            {etdDestOptions.map(d => {
+              const on = etdAddDests.includes(d)
+              const cnt = etdPeriodCandidates.filter(b => (b.final_destination || '') === d).length
+              return (
+                <button key={d}
+                  onClick={() => setEtdAddDests(prev => on ? prev.filter(x => x !== d) : [...prev, d])}
+                  className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${on ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-600 border-gray-200 hover:border-emerald-400'}`}>
+                  {d} <span className="opacity-70">({cnt})</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 직전 PORT 목록 관리 */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
+        <div>
+          <label className="text-xs text-gray-500 block font-medium">직전 PORT 목록 관리 {portSaving && <span className="text-blue-500">(저장 중...)</span>}</label>
+          <p className="text-xs text-gray-400 mt-0.5">여기에 등록한 항목이 표의 &quot;직전 PORT&quot; 입력 시 목록상자로 나타납니다. (전체 공유)</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {prevPorts.map(p => (
+            <span key={p} className="inline-flex items-center gap-1 text-xs bg-sky-50 text-sky-700 border border-sky-200 rounded-full px-2 py-0.5">
+              {p}
+              <button onClick={() => removePrevPort(p)} className="text-sky-300 hover:text-red-500 transition-colors font-bold">✕</button>
+            </span>
+          ))}
+          {prevPorts.length === 0 && <span className="text-xs text-gray-300">등록된 항목 없음 — 예: 상해, 닝보</span>}
+          <input value={newPort} onChange={e => setNewPort(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addPrevPort() }}
+            placeholder="새 항목"
+            className="w-24 border border-gray-200 rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-sky-400" />
+          <button onClick={addPrevPort} disabled={!newPort.trim()}
+            className="text-xs px-2 py-0.5 bg-sky-500 text-white rounded hover:bg-sky-600 disabled:opacity-40 transition-colors">추가</button>
         </div>
       </div>
 
@@ -531,31 +652,31 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
             <table className="text-xs border-collapse">
               <thead>
                 <tr>
-                  <th rowSpan={2} className={`${th} bg-gray-500`}>고유<br />번호</th>
+                  <th rowSpan={2} onClick={() => handleSort('seq')} title="클릭 시 정렬" className={`${th} bg-gray-500 cursor-pointer select-none hover:brightness-110`}>고유<br />번호{arrow('seq')}</th>
                   <th rowSpan={2} className={`${th} ${thNavy}`}>법인</th>
                   <th rowSpan={2} className={`${th} ${thNavy}`}>법인/<br />대리점</th>
-                  <th rowSpan={2} className={`${th} ${thNavy}`}>도착지</th>
-                  <th rowSpan={2} className={`${th} ${thNavy}`}>직전<br />PORT</th>
-                  <th rowSpan={2} className={`${th} ${thNavy}`}>선사</th>
-                  <th rowSpan={2} className={`${th} ${thNavy}`}>선명 &<br />VOYAGE</th>
+                  <th rowSpan={2} onClick={() => handleSort('dest')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>도착지{arrow('dest')}</th>
+                  <th rowSpan={2} onClick={() => handleSort('prev_port')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>직전<br />PORT{arrow('prev_port')}</th>
+                  <th rowSpan={2} onClick={() => handleSort('carrier')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>선사{arrow('carrier')}</th>
+                  <th rowSpan={2} onClick={() => handleSort('vessel')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>선명 &<br />VOYAGE{arrow('vessel')}</th>
                   <th colSpan={3} className={`${th} bg-[#C55A11]`}>상해 / 닝보(PUS 직전 PORT 기준)</th>
                   <th colSpan={6} className={`${th} bg-[#BF9000]`}>부산</th>
-                  <th rowSpan={2} className={`${th} ${thOrange}`}>MQC<br />(/WK)</th>
-                  <th rowSpan={2} className={`${th} ${thOrange}`}>확보<br />선복</th>
-                  <th rowSpan={2} className={`${th} ${thOrange}`}>실 마감<br />물량</th>
-                  <th rowSpan={2} className={`${th} ${thOrange}`}>비고</th>
+                  <th rowSpan={2} onClick={() => handleSort('mqc')} title="클릭 시 정렬" className={`${th} ${thOrange} cursor-pointer select-none hover:brightness-110`}>MQC<br />(/WK){arrow('mqc')}</th>
+                  <th rowSpan={2} onClick={() => handleSort('secured')} title="클릭 시 정렬" className={`${th} ${thOrange} cursor-pointer select-none hover:brightness-110`}>확보<br />선복{arrow('secured')}</th>
+                  <th rowSpan={2} onClick={() => handleSort('qty')} title="클릭 시 정렬" className={`${th} ${thOrange} cursor-pointer select-none hover:brightness-110`}>실 마감<br />물량{arrow('qty')}</th>
+                  <th rowSpan={2} onClick={() => handleSort('remarks')} title="클릭 시 정렬" className={`${th} ${thOrange} cursor-pointer select-none hover:brightness-110`}>비고{arrow('remarks')}</th>
                   <th rowSpan={2} className={`${th} bg-gray-400`}>삭제</th>
                 </tr>
                 <tr>
-                  <th className={`${th} ${thNavy}`}>최초<br />출항일</th>
-                  <th className={`${th} ${thNavy}`}>현재<br />출항일</th>
-                  <th className={`${th} bg-[#7F3E0C]`}>지연일<br /><span className="text-[9px] font-normal opacity-80">자동</span></th>
-                  <th className={`${th} ${thNavy}`}>부산출항<br />(최초)</th>
-                  <th className={`${th} ${thNavy}`}>부산출항<br />(현재 ETD)</th>
-                  <th className={`${th} ${thNavy}`}>접안일</th>
-                  <th className={`${th} bg-[#7F3E0C]`}>지연일<br /><span className="text-[9px] font-normal opacity-80">자동</span></th>
-                  <th className={`${th} ${thNavy}`}>서류마감</th>
-                  <th className={`${th} ${thNavy}`}>P.O.D<br />ETA</th>
+                  <th onClick={() => handleSort('first_dep')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>최초<br />출항일{arrow('first_dep')}</th>
+                  <th onClick={() => handleSort('cur_dep')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>현재<br />출항일{arrow('cur_dep')}</th>
+                  <th onClick={() => handleSort('delay_sh')} title="클릭 시 정렬" className={`${th} bg-[#7F3E0C] cursor-pointer select-none hover:brightness-110`}>지연일{arrow('delay_sh')}<br /><span className="text-[9px] font-normal opacity-80">자동</span></th>
+                  <th onClick={() => handleSort('busan_first')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>부산출항<br />(최초){arrow('busan_first')}</th>
+                  <th onClick={() => handleSort('busan_cur')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>부산출항<br />(현재 ETD){arrow('busan_cur')}</th>
+                  <th onClick={() => handleSort('berthing')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>접안일{arrow('berthing')}</th>
+                  <th onClick={() => handleSort('delay_bs')} title="클릭 시 정렬" className={`${th} bg-[#7F3E0C] cursor-pointer select-none hover:brightness-110`}>지연일{arrow('delay_bs')}<br /><span className="text-[9px] font-normal opacity-80">자동</span></th>
+                  <th onClick={() => handleSort('doc_cutoff')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>서류마감{arrow('doc_cutoff')}</th>
+                  <th onClick={() => handleSort('eta')} title="클릭 시 정렬" className={`${th} ${thNavy} cursor-pointer select-none hover:brightness-110`}>P.O.D<br />ETA{arrow('eta')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -585,7 +706,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows }: Props) {
                       <td className={`${td} text-gray-800`}>{b?.final_destination || dash}</td>
                       {/* 직전 PORT (수동) */}
                       <td className="px-1 py-1 border border-gray-200 bg-sky-50/30">
-                        <input value={r.prev_port}
+                        <input value={r.prev_port} list="shanghai-prev-ports"
                           ref={el => { inputRefs.current[`${idx}:prev_port`] = el }}
                           onChange={e => updateRow(r.key, 'prev_port', e.target.value)}
                           onKeyDown={e => handleNav(e, idx, 'prev_port')}
