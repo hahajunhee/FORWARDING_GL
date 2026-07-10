@@ -220,6 +220,7 @@ export type ShanghaiRowInput = {
   first_departure: string   // F 최초 출항일
   current_departure: string // G 현재 출항일
   berthing: string          // K 접안일
+  mqc: string               // O MQC(/WK)
 }
 
 export async function saveShanghaiMgmt(
@@ -243,11 +244,17 @@ export async function saveShanghaiMgmt(
       first_departure: r.first_departure || '',
       current_departure: r.current_departure || '',
     }))
-    const payload = base.map((b, i) => ({ ...b, berthing: rows[i].berthing || '' }))
-    let { error: insErr } = await supabase.from('shanghai_mgmt').insert(payload)
-    // migration v15(berthing) 미적용 시 접안일 없이 재시도 (F/G는 저장되도록)
-    if (insErr && /berthing/i.test(insErr.message)) {
-      ({ error: insErr } = await supabase.from('shanghai_mgmt').insert(base))
+    const withBerthing = base.map((b, i) => ({ ...b, berthing: rows[i].berthing || '' }))
+    const withAll = withBerthing.map((b, i) => ({ ...b, mqc: rows[i].mqc || '' }))
+    // 신규 컬럼 미적용 마이그레이션 상태도 안전하게 — 단계적으로 폴백
+    const candidates = [withAll, withBerthing, base]
+    let insErr: { message: string } | null = null
+    for (const payload of candidates) {
+      const res = await supabase.from('shanghai_mgmt').insert(payload)
+      insErr = res.error
+      if (!insErr) break
+      // 컬럼 없음 오류가 아니면 즉시 중단
+      if (!/does not exist|berthing|mqc|column/i.test(insErr.message)) break
     }
     if (insErr) return { error: insErr.message }
   }

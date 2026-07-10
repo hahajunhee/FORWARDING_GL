@@ -106,6 +106,7 @@ export interface ShanghaiMgmtRow {
   first_departure: string   // F 최초 출항일 (수동)
   current_departure: string // G 현재 출항일 (수동)
   berthing: string          // K 접안일 (수동)
+  mqc: string               // O MQC(/WK) (수동, 도착지별 기본값 일괄설정 가능)
   delay_shanghai: string    // (미사용 — H는 자동계산)
   delay_busan: string       // (미사용 — L은 자동계산)
   created_at: string
