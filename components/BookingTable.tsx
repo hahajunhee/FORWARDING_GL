@@ -203,6 +203,22 @@ export function formatContainers(b: Partial<Booking>): string {
   return parts.join(' ') || '-'
 }
 
+// ── 도착지 공유 그룹 (같은 부킹번호+모선명+VOYAGE = 한 부킹을 여러 도착지가 나눔) ──
+// 그룹총량 = 각 행 컨테이너 대수 합의 최대값 (기존유지 복사로 entries가 복제돼도 중복집계 없음)
+function entryUnitSum(b: Booking): number {
+  if (b.booking_entries && b.booking_entries.length > 0) {
+    return b.booking_entries.reduce((s, e) => s + (e.ctr_qty || 0), 0)
+  }
+  return (b.qty_20_normal || 0) + (b.qty_20_dg || 0) + (b.qty_20_reefer || 0)
+    + (b.qty_40_normal || 0) + (b.qty_40_dg || 0) + (b.qty_40_reefer || 0)
+}
+function groupKeyOf(b: Booking): string | null {
+  const no = ((b.booking_entries && b.booking_entries.length > 0) ? b.booking_entries[0]?.no : b.booking_no) || ''
+  if (!no || !b.vessel_name) return null
+  return `${no}|${b.vessel_name}|${b.voyage || ''}`
+}
+export type BookingGroup = { key: string; total: number; rows: Booking[] }
+
 function calcFinalQty(b: Booking): number | null {
   if (!b.doc_cutoff_date) return null
   try {
@@ -923,6 +939,24 @@ export default function BookingTable({
     return () => mq.removeEventListener('change', update)
   }, [])
   const pinnedColumns = isMobile ? [] : pinnedColumnsProp
+
+  // ── 도착지 공유 그룹 감지 + 일괄편집 모달 ────────────────────────
+  const groupMap = useMemo(() => {
+    const groups: Record<string, Booking[]> = {}
+    for (const b of bookings) {
+      const k = groupKeyOf(b)
+      if (!k) continue
+      ;(groups[k] = groups[k] || []).push(b)
+    }
+    const m: Record<string, BookingGroup> = {}
+    for (const [k, rows] of Object.entries(groups)) {
+      if (rows.length < 2) continue // 2행 이상 공유할 때만 그룹
+      const total = Math.max(...rows.map(entryUnitSum))
+      for (const r of rows) m[r.id] = { key: k, total, rows }
+    }
+    return m
+  }, [bookings])
+  const [groupEditKey, setGroupEditKey] = useState<string | null>(null)
 
   const [editMode, setEditMode] = useState(false)
   const [bulkSaving, setBulkSaving] = useState(false)
@@ -2050,6 +2084,15 @@ export default function BookingTable({
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} />
                 : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} />
               }
+              {col === 'booking_no' && !canEditCell && groupMap[booking.id] && (
+                <button
+                  onClick={e => { e.stopPropagation(); setGroupEditKey(groupMap[booking.id].key) }}
+                  onMouseDown={e => e.stopPropagation()}
+                  className="mt-0.5 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors font-semibold"
+                  title={`도착지 공유 그룹 (${groupMap[booking.id].rows.length}개 도착지) — 클릭하여 배분수량 일괄 편집`}>
+                  🔗 {booking.alloc_qty ?? '-'}/{groupMap[booking.id].total}
+                </button>
+              )}
             </td>
           )
         })}
@@ -2618,6 +2661,184 @@ export default function BookingTable({
               ) : renderBody()}
             </tbody>
           </table>
+      </div>
+
+      {/* 도착지 공유 그룹 일괄편집 모달 */}
+      {groupEditKey && (() => {
+        const g = Object.values(groupMap).find(x => x.key === groupEditKey)
+        if (!g) return null
+        return (
+          <GroupEditModal
+            group={g}
+            destinations={destinations}
+            onClose={() => setGroupEditKey(null)}
+            onSaved={() => { setGroupEditKey(null); router.refresh() }}
+          />
+        )
+      })()}
+    </div>
+  )
+}
+
+// ── 도착지 공유 그룹 일괄편집 모달 ──────────────────────────────────
+// 그룹총량(예: 100) 대비 도착지별 배분수량을 한 화면에서 편집·저장.
+// 도착지 추가 시 부킹번호·모선명·날짜 등 모든 정보를 공유하는 새 행 생성.
+function GroupEditModal({ group, destinations, onClose, onSaved }: {
+  group: BookingGroup
+  destinations: string[]
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const repr = group.rows[0]
+  const [allocs, setAllocs] = useState<Record<string, string>>(() =>
+    Object.fromEntries(group.rows.map(r => [r.id, r.alloc_qty != null ? String(r.alloc_qty) : ''])))
+  const [newDests, setNewDests] = useState<{ dest: string; alloc: string }[]>([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const sumAlloc = [...Object.values(allocs), ...newDests.map(d => d.alloc)]
+    .reduce((s, v) => s + (parseFloat(v) || 0), 0)
+  const remaining = group.total - sumAlloc
+
+  const handleSave = async () => {
+    setSaving(true); setError(null)
+    const edits = group.rows.map(r => ({
+      id: r.id,
+      data: { alloc_qty: allocs[r.id] === '' ? null : Number(allocs[r.id]) } as Record<string, unknown>,
+    }))
+    const inserts = newDests.filter(d => d.dest.trim()).map((d, i) => ({
+      tempId: `grp-new-${i}`,
+      data: {
+        booking_no: repr.booking_no,
+        booking_entries: repr.booking_entries,
+        final_destination: d.dest.trim().toUpperCase(),
+        discharge_port: repr.discharge_port,
+        carrier: repr.carrier,
+        vessel_name: repr.vessel_name,
+        voyage: repr.voyage,
+        secured_space: repr.secured_space,
+        mqc: repr.mqc,
+        customer_doc_handler: repr.customer_doc_handler,
+        forwarder_handler_id: repr.forwarder_handler_id,
+        doc_cutoff_date: repr.doc_cutoff_date,
+        proforma_etd: repr.proforma_etd,
+        updated_etd: repr.updated_etd,
+        eta: repr.eta,
+        qty_20_normal: repr.qty_20_normal || 0,
+        qty_20_dg: repr.qty_20_dg || 0,
+        qty_20_reefer: repr.qty_20_reefer || 0,
+        qty_40_normal: repr.qty_40_normal || 0,
+        qty_40_dg: repr.qty_40_dg || 0,
+        qty_40_reefer: repr.qty_40_reefer || 0,
+        remarks: '',
+        extra_data: repr.extra_data,
+        alloc_qty: d.alloc === '' ? null : Number(d.alloc),
+      } as Record<string, unknown>,
+    }))
+    const { errors } = await bulkSaveBookings(edits, inserts)
+    if (Object.keys(errors).length > 0) {
+      setError(Object.values(errors)[0])
+      setSaving(false)
+      return
+    }
+    onSaved()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto">
+        {/* 헤더 */}
+        <div className="px-5 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-xl">
+          <h3 className="text-sm font-bold text-gray-900">🔗 도착지 배분수량 일괄편집</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            부킹 <span className="font-mono text-blue-700">{(repr.booking_entries && repr.booking_entries[0]?.no) || repr.booking_no}</span>
+            {' · '}{repr.vessel_name}{repr.voyage ? ` / ${repr.voyage}` : ''}
+            {' · '}그룹총량 <b className="text-gray-800">{group.total}대</b>
+          </p>
+        </div>
+
+        {/* 본문 */}
+        <div className="p-5 space-y-3">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-gray-400 border-b border-gray-100">
+                <th className="text-left py-1.5 font-medium">도착지</th>
+                <th className="text-center py-1.5 font-medium w-32">배분수량 (대)</th>
+                <th className="w-8"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.rows.map(r => (
+                <tr key={r.id} className="border-b border-gray-50">
+                  <td className="py-2 font-medium text-gray-800">{r.final_destination || <span className="text-gray-300">-</span>}</td>
+                  <td className="py-1.5 text-center">
+                    <div className="inline-flex items-center gap-1">
+                      <input type="number" min={0} value={allocs[r.id]}
+                        onChange={e => setAllocs(prev => ({ ...prev, [r.id]: e.target.value }))}
+                        placeholder="-"
+                        className="w-16 border border-gray-200 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-violet-400" />
+                      <span className="text-gray-400">/ {group.total}</span>
+                    </div>
+                  </td>
+                  <td></td>
+                </tr>
+              ))}
+              {newDests.map((d, i) => (
+                <tr key={`new-${i}`} className="border-b border-gray-50 bg-violet-50/30">
+                  <td className="py-1.5">
+                    <input value={d.dest} list="group-dest-options"
+                      onChange={e => setNewDests(prev => prev.map((x, xi) => xi === i ? { ...x, dest: e.target.value } : x))}
+                      placeholder="새 도착지"
+                      className="w-full border border-violet-200 rounded px-2 py-1 text-xs uppercase focus:outline-none focus:ring-1 focus:ring-violet-400" />
+                  </td>
+                  <td className="py-1.5 text-center">
+                    <div className="inline-flex items-center gap-1">
+                      <input type="number" min={0} value={d.alloc}
+                        onChange={e => setNewDests(prev => prev.map((x, xi) => xi === i ? { ...x, alloc: e.target.value } : x))}
+                        placeholder="-"
+                        className="w-16 border border-violet-200 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-violet-400" />
+                      <span className="text-gray-400">/ {group.total}</span>
+                    </div>
+                  </td>
+                  <td className="text-center">
+                    <button onClick={() => setNewDests(prev => prev.filter((_, xi) => xi !== i))}
+                      className="text-gray-300 hover:text-red-500 transition-colors">✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <datalist id="group-dest-options">
+            {destinations.map(d => <option key={d} value={d} />)}
+          </datalist>
+
+          <button onClick={() => setNewDests(prev => [...prev, { dest: '', alloc: '' }])}
+            className="w-full text-xs py-1.5 text-violet-600 hover:bg-violet-50 rounded-lg border border-dashed border-violet-300 transition-colors">
+            + 도착지 추가 (부킹번호·모선명·날짜 공유하는 새 행 생성)
+          </button>
+
+          {/* 합계 표시 */}
+          <div className={`rounded-lg px-3 py-2 text-xs flex items-center justify-between ${
+            remaining === 0 ? 'bg-green-50 text-green-700' : remaining > 0 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'
+          }`}>
+            <span>배분 합계 <b>{sumAlloc}</b> / 총량 <b>{group.total}</b></span>
+            <span className="font-semibold">
+              {remaining === 0 ? '✓ 배분 완료' : remaining > 0 ? `미배분 ${remaining}대` : `초과 ${-remaining}대!`}
+            </span>
+          </div>
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+        </div>
+
+        {/* 푸터 */}
+        <div className="px-5 py-3 border-t border-gray-100 flex justify-end gap-2 sticky bottom-0 bg-white rounded-b-xl">
+          <button onClick={onClose} className="px-4 py-2 text-xs text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors">취소</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-4 py-2 text-xs text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors font-medium">
+            {saving ? '저장 중...' : '일괄 저장'}
+          </button>
+        </div>
       </div>
     </div>
   )

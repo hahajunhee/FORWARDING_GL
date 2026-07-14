@@ -68,6 +68,7 @@ export interface Booking {
   qty_40_dg: number
   qty_40_reefer: number
   con_pickup_qty: number
+  alloc_qty: number | null
   remarks: string
   booking_entries: BookingEntry[] | null
   extra_data: Record<string, string> | null

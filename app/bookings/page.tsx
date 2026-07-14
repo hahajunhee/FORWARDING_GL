@@ -25,6 +25,7 @@ export default async function BookingsPage() {
     { data: shanghaiRows },
     { data: seqRows },
     { data: prevPortsSetting },
+    { data: allocRows },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -44,16 +45,23 @@ export default async function BookingsPage() {
     // seq_no(고유번호)는 별도 조회로 병합 — 마이그레이션 미적용 시에도 부킹장이 깨지지 않도록 방어
     supabase.from('bookings').select('id, seq_no'),
     supabase.from('global_settings').select('value').eq('key', 'shanghai_prev_ports').single(),
+    // alloc_qty(배분수량)도 별도 조회 — 마이그레이션 미적용 시 무시
+    supabase.from('bookings').select('id, alloc_qty'),
   ])
 
-  // seq_no 병합 (컬럼 없거나 오류 시 무시)
+  // seq_no·alloc_qty 병합 (컬럼 없거나 오류 시 무시)
   const seqMap = new Map<string, number>()
   for (const r of (seqRows || []) as { id: string; seq_no: number | null }[]) {
     if (r.seq_no != null) seqMap.set(r.id, r.seq_no)
   }
+  const allocMap = new Map<string, number>()
+  for (const r of (allocRows || []) as { id: string; alloc_qty: number | null }[]) {
+    if (r.alloc_qty != null) allocMap.set(r.id, r.alloc_qty)
+  }
   const bookingsWithSeq = ((bookings || []) as unknown as Booking[]).map(b => ({
     ...b,
     seq_no: seqMap.get(b.id) ?? b.seq_no,
+    alloc_qty: allocMap.get(b.id) ?? null,
   }))
 
   return (
