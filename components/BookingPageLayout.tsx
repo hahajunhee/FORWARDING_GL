@@ -97,6 +97,7 @@ export default function BookingPageLayout({
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
+  const [sidebarOpen, setSidebarOpen] = useState(false) // 모바일 드로어
 
   const pinnedColumns = currentProfile?.pinned_columns || DEFAULT_PINNED_COLUMNS
   const docTemplate = currentProfile?.doc_template || null
@@ -117,6 +118,13 @@ export default function BookingPageLayout({
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30 flex-shrink-0">
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <button onClick={() => setSidebarOpen(v => !v)}
+              className="md:hidden p-1.5 -ml-1 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0"
+              aria-label="메뉴">
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -157,15 +165,21 @@ export default function BookingPageLayout({
 
       {/* 본문 = 사이드바 + 컨텐츠 */}
       <div className="flex flex-1 min-h-0">
-        {/* 왼쪽 사이드바 */}
-        <aside className="w-44 flex-shrink-0 bg-white border-r border-gray-200 sticky top-[57px] h-[calc(100vh-57px)] overflow-y-auto">
+        {/* 모바일: 드로어 열림 시 배경 */}
+        {sidebarOpen && (
+          <div className="fixed inset-0 bg-black/30 z-30 md:hidden" onClick={() => setSidebarOpen(false)} />
+        )}
+        {/* 왼쪽 사이드바 — 모바일에서는 햄버거로 여닫는 드로어 */}
+        <aside className={`w-44 flex-shrink-0 bg-white border-r border-gray-200 top-[57px] h-[calc(100vh-57px)] overflow-y-auto ${
+          sidebarOpen ? 'fixed left-0 z-40 shadow-xl' : 'hidden'
+        } md:block md:sticky md:z-auto md:shadow-none`}>
           <nav className="p-2 space-y-1 pt-3">
             {TABS.map(tab => {
               const isActive = activeTab === tab.key
               return (
                 <button
                   key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
+                  onClick={() => { setActiveTab(tab.key); setSidebarOpen(false) }}
                   className={`w-full flex items-start gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors group relative ${
                     isActive
                       ? 'bg-blue-600 text-white'
@@ -204,7 +218,7 @@ export default function BookingPageLayout({
         {/* 메인 컨텐츠 */}
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {activeTab === 'bookings' && (
-            <div className="flex-1 min-h-0 flex flex-col p-4">
+            <div className="flex-1 min-h-0 flex flex-col p-2 md:p-4">
               <BookingTable
                 bookings={bookings}
                 profiles={profiles}
@@ -223,7 +237,7 @@ export default function BookingPageLayout({
             </div>
           )}
           {activeTab === 'doc_cutoff' && (
-            <div className="flex-1 overflow-auto p-4 space-y-3">
+            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">서류마감</h2>
                 <p className="text-sm text-gray-500">날짜를 선택하면 해당 날짜 마감 부킹의 메일 초안을 자동 생성합니다.</p>
@@ -238,7 +252,7 @@ export default function BookingPageLayout({
             </div>
           )}
           {activeTab === 'reefer_cutoff' && (
-            <div className="flex-1 overflow-auto p-4 space-y-3">
+            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">리퍼마감메일</h2>
                 <p className="text-sm text-gray-500">부킹번호를 입력하면 부킹 정보를 조회하여 메일용 테이블을 생성합니다.</p>
@@ -247,7 +261,7 @@ export default function BookingPageLayout({
             </div>
           )}
           {activeTab === 'schedule' && (
-            <div className="flex-1 overflow-auto p-4 space-y-3">
+            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">주요 스케줄</h2>
                 <p className="text-sm text-gray-500">고객사 송부용 스케줄을 열 구성 후 Excel로 다운로드합니다.</p>
@@ -256,7 +270,7 @@ export default function BookingPageLayout({
             </div>
           )}
           {activeTab === 'shanghai' && (
-            <div className="flex-1 overflow-auto p-4 space-y-3">
+            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">상해발관리</h2>
                 <p className="text-sm text-gray-500">부킹장의 고유번호로 집중관리 대상을 추가하고, MPA 주요 PDC 스케줄 현황 보고서를 Excel로 다운로드합니다.</p>

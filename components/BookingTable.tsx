@@ -900,7 +900,7 @@ interface Props {
 
 export default function BookingTable({
   bookings, profiles, currentUserId, currentProfile, customLists,
-  pinnedColumns = DEFAULT_PINNED_COLUMNS,
+  pinnedColumns: pinnedColumnsProp = DEFAULT_PINNED_COLUMNS,
   customColumns = [],
   regionList = [],
   customerList = [],
@@ -912,6 +912,17 @@ export default function BookingTable({
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+
+  // 모바일(768px 미만)에서는 틀고정(sticky 열) 해제 — 좁은 화면에서 표가 잘 보이도록
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+  const pinnedColumns = isMobile ? [] : pinnedColumnsProp
 
   const [editMode, setEditMode] = useState(false)
   const [bulkSaving, setBulkSaving] = useState(false)
