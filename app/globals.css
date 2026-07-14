@@ -1,49 +1,82 @@
+/* Pretendard Variable — 한글 UI 최적화 프리미엄 폰트 (dynamic subset) */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   html {
-    font-family: 'Pretendard', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'Pretendard Variable', Pretendard, 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    letter-spacing: -0.011em;
   }
 
   body {
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+
+  /* 폼 요소 포커스 링 통일 */
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: none;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm;
+    @apply bg-gradient-to-b from-indigo-500 to-indigo-600 text-white px-4 py-2 rounded-lg font-medium text-sm
+      shadow-sm shadow-indigo-500/30 hover:from-indigo-600 hover:to-indigo-700 active:scale-[0.98] transition-all;
   }
 
   .btn-secondary {
-    @apply bg-white text-gray-700 px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors font-medium text-sm;
+    @apply bg-white text-slate-700 px-4 py-2 rounded-lg border border-slate-200 font-medium text-sm
+      shadow-sm hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] transition-all;
   }
 
   .btn-danger {
-    @apply bg-red-50 text-red-600 px-3 py-1.5 rounded hover:bg-red-100 transition-colors text-xs font-medium;
+    @apply bg-red-50 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-100 transition-colors text-xs font-medium;
   }
 
   .input-field {
-    @apply w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent;
+    @apply w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white shadow-sm
+      focus:outline-none focus:ring-2 focus:ring-indigo-500/60 focus:border-transparent transition-shadow;
   }
 
   .label {
-    @apply block text-sm font-medium text-gray-700 mb-1;
+    @apply block text-sm font-medium text-slate-700 mb-1;
   }
 
   .table-th {
-    @apply px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wide whitespace-nowrap border-b-2 border-b-gray-400;
-    background: linear-gradient(to bottom, #f8fafc, #eef2f7);
-    border-left: 1px solid #d1d5db;
-    border-right: 1px solid #d1d5db;
+    @apply px-3 py-2.5 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap;
+    background: linear-gradient(180deg, #fafbfd 0%, #f1f5f9 100%);
+    border-bottom: 2px solid #cbd5e1;
+    border-left: 1px solid #e2e8f0;
+    border-right: 1px solid #e2e8f0;
   }
 
   .table-td {
-    @apply px-3 py-2 text-sm text-gray-800 whitespace-nowrap;
-    border-bottom: 1px solid #d1d5db;
+    @apply px-3 py-2 text-sm text-slate-800 whitespace-nowrap;
+    border-bottom: 1px solid #e2e8f0;
   }
+}
+
+/* ── 스크롤바 (얇고 세련되게) ─────────────────────────────────── */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 /* 테이블 스크롤 */
@@ -67,7 +100,7 @@
 
 /* 테이블 행 호버 효과 (sticky/pinned 셀도 포함하기 위해 !important 사용) */
 table tbody tr:hover td {
-  background-color: #f0f7ff !important;
+  background-color: #eef2ff !important;
 }
 
 /* 드래그 범위 선택 중: hover 억제 */
@@ -77,10 +110,10 @@ table tbody tr:hover td {
 
 /* 드래그 범위 선택된 셀 — hover보다 우선 */
 table tbody tr td[data-cell-sel="true"] {
-  background-color: #dbeafe !important;
+  background-color: #e0e7ff !important;
 }
 table tbody tr td[data-cell-sel-pinned="true"] {
-  background-color: #bfdbfe !important;
+  background-color: #c7d2fe !important;
 }
 
 /* 숫자 입력 화살표(spinner) 제거 */
@@ -91,4 +124,10 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* 카드 공통 — 은은한 그림자와 얇은 테두리 */
+.rounded-xl.border,
+.rounded-lg.border {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
 }

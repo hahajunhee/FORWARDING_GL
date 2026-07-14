@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { differenceInCalendarDays, parseISO, isValid, format, addDays } from 'date-fns'
 import { ko } from 'date-fns/locale'
@@ -640,35 +641,71 @@ function normalizeDateInput(v: string): string | null {
 
 // ── 자동완성 입력 ─────────────────────────────────────────────────
 
+// 목록은 portal(document.body)에 fixed로 렌더 — 표의 sticky 셀·스크롤 컨테이너에 가려지지 않음
 function AutocompleteInput({ value, options, onChange, placeholder, className, autoFocus }: {
   value: string; options: string[]; onChange: (v: string) => void
   placeholder?: string; className?: string; autoFocus?: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+
+  const openList = () => {
+    const el = wrapRef.current
+    if (el) {
+      const r = el.getBoundingClientRect()
+      // 화면 하단에 공간이 부족하면 위로 펼침
+      const openUp = window.innerHeight - r.bottom < 200 && r.top > 200
+      setPos({ left: r.left, top: openUp ? r.top - 2 : r.bottom + 2, width: Math.max(r.width, 140) })
+    }
+    setOpen(true)
+  }
+
+  // 표 스크롤 시 위치가 틀어지므로 닫기 (목록 내부 스크롤은 예외)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: Event) => {
+      if (listRef.current && e.target instanceof Node && listRef.current.contains(e.target)) return
+      setOpen(false)
+    }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close) }
+  }, [open])
+
   const filtered = value
     ? options.filter(o => o.toLowerCase().includes(value.toLowerCase()))
     : options
+  const openUp = pos !== null && pos.top < (wrapRef.current?.getBoundingClientRect().top ?? Infinity)
+
   return (
-    <div className="relative">
+    <div ref={wrapRef} className="relative">
       <input
         className={className}
         value={value}
         autoFocus={autoFocus}
-        onChange={e => { onChange(e.target.value); setOpen(true) }}
-        onFocus={() => setOpen(true)}
+        onChange={e => { onChange(e.target.value); openList() }}
+        onFocus={openList}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder={placeholder}
       />
-      {open && filtered.length > 0 && (
-        <ul className="absolute z-50 left-0 top-full mt-0.5 w-full min-w-[120px] bg-white border border-gray-200 rounded-lg shadow-lg max-h-44 overflow-y-auto text-xs">
+      {open && filtered.length > 0 && pos && typeof document !== 'undefined' && createPortal(
+        <ul ref={listRef}
+          style={{
+            position: 'fixed', left: pos.left, width: pos.width, zIndex: 9999,
+            ...(openUp ? { bottom: window.innerHeight - pos.top } : { top: pos.top }),
+          }}
+          className="bg-white border border-slate-200 rounded-lg shadow-xl max-h-44 overflow-y-auto text-xs">
           {filtered.map(opt => (
             <li key={opt}
               onMouseDown={e => { e.preventDefault(); onChange(opt); setOpen(false) }}
-              className="px-2 py-1.5 cursor-pointer hover:bg-blue-50 hover:text-blue-700 whitespace-nowrap">
+              className="px-2.5 py-1.5 cursor-pointer hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap">
               {opt}
             </li>
           ))}
-        </ul>
+        </ul>,
+        document.body
       )}
     </div>
   )
