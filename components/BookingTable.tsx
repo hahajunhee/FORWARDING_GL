@@ -2008,30 +2008,30 @@ export default function BookingTable({
         {!isOwnBooking && editMode && !hasEdits
           ? <span className="text-xs text-gray-400 italic">타인 담당</span>
           : (
-            <div className="flex items-center gap-1 flex-wrap">
+            <div className="flex items-center gap-1 flex-nowrap">
               {editMode && hasEdits && (
                 <button onClick={() => {
                   setRowEdits(p => { const c = { ...p }; delete c[booking.id]; return c })
                   setRowErrors(p => { const c = { ...p }; delete c[booking.id]; return c })
-                }} className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition-colors">되돌리기</button>
+                }} className="text-[11px] leading-none px-1.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition-colors whitespace-nowrap">되돌리기</button>
               )}
               <button onClick={() => handleCopyRow(booking, false)}
-                className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                className="text-[11px] leading-none px-1.5 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors whitespace-nowrap"
                 title="부킹번호·모선명·VOYAGE·서류마감·ETD·ETA·비고는 비우고 복사">복사</button>
               <button onClick={() => handleCopyRow(booking, true)}
-                className="text-xs px-2 py-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition-colors"
+                className="text-[11px] leading-none px-1.5 py-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition-colors whitespace-nowrap"
                 title="모든 값을 그대로 유지하여 복제">기존유지</button>
               {isOwnBooking && (
                 deleteConfirmId === booking.id ? (
                   <>
                     <button onClick={() => handleDelete(booking.id)} disabled={isPending}
-                      className="text-xs px-2 py-1 bg-red-600 text-white rounded">확인</button>
+                      className="text-[11px] leading-none px-1.5 py-1 bg-red-600 text-white rounded whitespace-nowrap">확인</button>
                     <button onClick={() => setDeleteConfirmId(null)}
-                      className="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded">취소</button>
+                      className="text-[11px] leading-none px-1.5 py-1 bg-gray-100 text-gray-600 rounded whitespace-nowrap">취소</button>
                   </>
                 ) : (
                   <button onClick={() => setDeleteConfirmId(booking.id)}
-                    className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">삭제</button>
+                    className="text-[11px] leading-none px-1.5 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors whitespace-nowrap">삭제</button>
                 )
               )}
             </div>

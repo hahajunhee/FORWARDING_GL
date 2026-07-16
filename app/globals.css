@@ -46,7 +46,7 @@
   }
 
   .table-th {
-    @apply px-3 py-2.5 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap;
+    @apply px-3 py-2 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap;
     background: linear-gradient(180deg, #fafbfd 0%, #f1f5f9 100%);
     border-bottom: 2px solid #cbd5e1;
     border-left: 1px solid #e2e8f0;
@@ -54,7 +54,7 @@
   }
 
   .table-td {
-    @apply px-3 py-2 text-sm text-slate-800 whitespace-nowrap;
+    @apply px-3 py-1 text-sm text-slate-800 whitespace-nowrap;
     border-bottom: 1px solid #e2e8f0;
   }
 }
