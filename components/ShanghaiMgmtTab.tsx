@@ -57,6 +57,29 @@ function busanDelay(b?: Booking): number | null {
   if (!isValid(a) || !isValid(c)) return null
   return differenceInCalendarDays(c, a)
 }
+
+// ── 도착지 표시 통일 (별칭 그룹 — 포함 단어 매칭 시 통일 라벨로 표시) ──
+const DEST_ALIASES: { match: string[]; label: string }[] = [
+  { match: ['ONTARIO', 'RIVERSIDE'], label: 'ONTARIO + RIVERSIDE' },
+]
+function displayDest(dest: string | null | undefined): string {
+  const u = (dest || '').toUpperCase()
+  for (const a of DEST_ALIASES) {
+    if (a.match.some(m => u.includes(m))) return a.label
+  }
+  return dest || ''
+}
+
+// 실 마감 물량: 서류마감일이 오늘보다 이전(지남)일 때만 표시, 그 외 공란
+function finalQtyAfterCutoff(b?: Booking): number | '' {
+  if (!b?.doc_cutoff_date) return ''
+  try {
+    const p = parseISO(b.doc_cutoff_date)
+    if (!isValid(p) || differenceInCalendarDays(p, new Date()) >= 0) return ''
+  } catch { return '' }
+  const q = calcTotalQty(b)
+  return q > 0 ? q : ''
+}
 function toExcelDate(d: string | null | undefined): Date | string {
   if (!d) return ''
   try { const p = parseISO(d); return isValid(p) ? p : '' } catch { return '' }
@@ -191,8 +214,8 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
       if (existing.has(n)) continue
       existing.add(n)
       const bk = bySeq.get(n)
-      // 도착지 기본값 있으면 우선, 없으면 부킹 자체 MQC
-      const dest = bk?.final_destination || ''
+      // 도착지 기본값 있으면 우선, 없으면 부킹 자체 MQC (별칭 통일 기준)
+      const dest = displayDest(bk?.final_destination)
       const mqcInit = mqcDefaults[dest] || bk?.mqc || ''
       additions.push({ key: nextKey(), booking_seq_no: n, prev_port: '', first_departure: '', current_departure: '', berthing: '', mqc: mqcInit, secured_space: securedDefault(bk), remarks: '' })
     }
@@ -209,15 +232,16 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
     const v = (mqcDefaults[dest] ?? '').trim()
     setRows(prev => prev.map(r => {
       const b = r.booking_seq_no != null ? bySeq.get(r.booking_seq_no) : undefined
-      return (b?.final_destination || '') === dest ? { ...r, mqc: v } : r
+      return displayDest(b?.final_destination) === dest ? { ...r, mqc: v } : r
     }))
   }
-  // 현재 행들의 도착지 목록 (중복 제거)
+  // 현재 행들의 도착지 목록 (별칭 통일 기준, 중복 제거)
   const distinctDests = useMemo(() => {
     const s = new Set<string>()
     for (const r of rows) {
       const b = r.booking_seq_no != null ? bySeq.get(r.booking_seq_no) : undefined
-      if (b?.final_destination) s.add(b.final_destination)
+      const d = displayDest(b?.final_destination)
+      if (d) s.add(d)
     }
     return Array.from(s).sort()
   }, [rows, bySeq])
@@ -245,15 +269,15 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
         return (a.seq_no || 0) - (b.seq_no || 0)
       })
   }, [rows, bookings, etdAddFrom, etdAddTo])
-  // 기간 내 후보의 도착지 목록 (선택 칩용)
+  // 기간 내 후보의 도착지 목록 (별칭 통일 기준, 선택 칩용)
   const etdDestOptions = useMemo(() =>
-    Array.from(new Set(etdPeriodCandidates.map(b => b.final_destination || '').filter(Boolean))).sort()
+    Array.from(new Set(etdPeriodCandidates.map(b => displayDest(b.final_destination)).filter(Boolean))).sort()
   , [etdPeriodCandidates])
   // 도착지 필터 적용된 최종 후보
   const etdCandidates = useMemo(() =>
     etdAddDests.length === 0
       ? etdPeriodCandidates
-      : etdPeriodCandidates.filter(b => etdAddDests.includes(b.final_destination || ''))
+      : etdPeriodCandidates.filter(b => etdAddDests.includes(displayDest(b.final_destination)))
   , [etdPeriodCandidates, etdAddDests])
 
   const handleEtdAdd = () => {
@@ -266,20 +290,21 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
       first_departure: '',
       current_departure: '',
       berthing: '',
-      mqc: mqcDefaults[bk.final_destination || ''] || bk.mqc || '',
+      mqc: mqcDefaults[displayDest(bk.final_destination)] || bk.mqc || '',
       secured_space: securedDefault(bk),
       remarks: '',
     }))])
   }
 
-  // ── 열 제목 클릭 정렬 (행 순서를 실제로 재배치 → 저장 시 그 순서로 영속) ──
-  const [sortState, setSortState] = useState<{ key: string; dir: 1 | -1 } | null>(null)
+  // ── 열 제목 클릭 정렬 — 다중 정렬 지원 (행 순서를 실제로 재배치 → 저장 시 영속) ──
+  // 클릭: 오름 → 내림 → 해제. 다른 열을 이어서 클릭하면 2차·3차 정렬로 누적.
+  const [sortLevels, setSortLevels] = useState<{ key: string; dir: 1 | -1 }[]>([])
   const sortVal = (r: LocalRow, key: string): string | number => {
     const b = r.booking_seq_no != null ? bySeq.get(r.booking_seq_no) : undefined
     const num = (s: string) => { const n = parseFloat(s); return isNaN(n) ? s : n }
     switch (key) {
       case 'seq':         return r.booking_seq_no ?? ''
-      case 'dest':        return b?.final_destination || ''
+      case 'dest':        return displayDest(b?.final_destination) // 별칭 통일 기준으로 정렬
       case 'prev_port':   return r.prev_port
       case 'carrier':     return b?.carrier || ''
       case 'vessel':      return vesselVoyage(b)
@@ -294,25 +319,40 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
       case 'eta':         return b?.eta || ''
       case 'mqc':         return num(r.mqc)
       case 'secured':     return num(r.secured_space)
-      case 'qty':         return b ? calcTotalQty(b) : ''
+      case 'qty':         return finalQtyAfterCutoff(b)
       case 'remarks':     return r.remarks
       default:            return ''
     }
   }
-  const handleSort = (key: string) => {
-    const dir: 1 | -1 = sortState?.key === key && sortState.dir === 1 ? -1 : 1
-    setSortState({ key, dir })
-    setRows(prev => [...prev].sort((a, b) => {
+  const cmpRows = (levels: { key: string; dir: 1 | -1 }[]) => (a: LocalRow, b: LocalRow): number => {
+    for (const { key, dir } of levels) {
       const va = sortVal(a, key), vb = sortVal(b, key)
       const ea = va === '' || va == null, eb = vb === '' || vb == null
-      if (ea && eb) return 0
+      if (ea && eb) continue
       if (ea) return 1  // 빈 값은 항상 아래로
       if (eb) return -1
-      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir
-      return String(va).localeCompare(String(vb), 'ko') * dir
-    }))
+      const c = (typeof va === 'number' && typeof vb === 'number')
+        ? va - vb
+        : String(va).localeCompare(String(vb), 'ko')
+      if (c !== 0) return c * dir
+    }
+    return 0
   }
-  const arrow = (key: string) => sortState?.key === key ? (sortState.dir === 1 ? ' ↑' : ' ↓') : ''
+  const handleSort = (key: string) => {
+    const i = sortLevels.findIndex(s => s.key === key)
+    let next: { key: string; dir: 1 | -1 }[]
+    if (i === -1) next = [...sortLevels, { key, dir: 1 as const }]
+    else if (sortLevels[i].dir === 1) next = sortLevels.map((s, si) => si === i ? { ...s, dir: -1 as const } : s)
+    else next = sortLevels.filter((_, si) => si !== i)
+    setSortLevels(next)
+    if (next.length > 0) setRows(r => [...r].sort(cmpRows(next)))
+  }
+  const arrow = (key: string) => {
+    const i = sortLevels.findIndex(s => s.key === key)
+    if (i === -1) return ''
+    const a = sortLevels[i].dir === 1 ? ' ↑' : ' ↓'
+    return sortLevels.length > 1 ? `${a}${i + 1}` : a
+  }
 
   // ── 직전 PORT 목록 (전체 공유, 유저가 직접 관리) ─────────────────
   const [prevPorts, setPrevPorts] = useState<string[]>(initialPrevPorts)
@@ -393,12 +433,12 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
         delayNums.push({ h, l })
         return [
           'MPA', 'MPA',
-          b?.final_destination || '', r.prev_port || '', b?.carrier || '', vesselVoyage(b),
+          displayDest(b?.final_destination), r.prev_port || '', b?.carrier || '', vesselVoyage(b),
           r.first_departure, r.current_departure, h ?? '',
           toExcelDate(b?.proforma_etd), toExcelDate(b?.updated_etd), r.berthing,
           l ?? '',
           toExcelDate(b?.doc_cutoff_date), toExcelDate(b?.eta),
-          r.mqc || '', r.secured_space || '', b ? (calcTotalQty(b) || '') : '', r.remarks || '',
+          r.mqc || '', r.secured_space || '', finalQtyAfterCutoff(b), r.remarks || '',
         ]
       })
 
@@ -456,12 +496,12 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
         let i = 0
         while (i < N) {
           const b = rows[i].booking_seq_no != null ? bySeq.get(rows[i].booking_seq_no!) : undefined
-          const v = c === 2 ? (b?.final_destination || '') : (b?.carrier || '')
+          const v = c === 2 ? displayDest(b?.final_destination) : (b?.carrier || '')
           if (!v) { i++; continue }
           let j = i + 1
           while (j < N) {
             const bj = rows[j].booking_seq_no != null ? bySeq.get(rows[j].booking_seq_no!) : undefined
-            const vj = c === 2 ? (bj?.final_destination || '') : (bj?.carrier || '')
+            const vj = c === 2 ? displayDest(bj?.final_destination) : (bj?.carrier || '')
             if (vj !== v) break
             j++
           }
@@ -563,7 +603,7 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
             </button>
             {etdDestOptions.map(d => {
               const on = etdAddDests.includes(d)
-              const cnt = etdPeriodCandidates.filter(b => (b.final_destination || '') === d).length
+              const cnt = etdPeriodCandidates.filter(b => displayDest(b.final_destination) === d).length
               return (
                 <button key={d}
                   onClick={() => setEtdAddDests(prev => on ? prev.filter(x => x !== d) : [...prev, d])}
@@ -640,6 +680,13 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
           Excel 다운로드
         </button>
         <span className="text-xs text-gray-400">{rows.length}건 관리 중</span>
+        {sortLevels.length > 0 && (
+          <button onClick={() => setSortLevels([])}
+            className="text-xs px-2.5 py-1 rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 font-medium transition-colors"
+            title="정렬 표시를 해제합니다 (현재 행 순서는 유지)">
+            정렬 {sortLevels.length}단계 해제
+          </button>
+        )}
       </div>
 
       {/* 표 */}
@@ -702,8 +749,8 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
                       {/* A,B 고정 */}
                       <td className={`${td} font-semibold text-gray-600 bg-slate-50`}>MPA</td>
                       <td className={`${td} font-semibold text-gray-600 bg-slate-50`}>MPA</td>
-                      {/* C 도착지 자동 */}
-                      <td className={`${td} text-gray-800`}>{b?.final_destination || dash}</td>
+                      {/* C 도착지 자동 (별칭 통일 표시) */}
+                      <td className={`${td} text-gray-800`} title={b?.final_destination || ''}>{displayDest(b?.final_destination) || dash}</td>
                       {/* 직전 PORT (수동) */}
                       <td className="px-1 py-1 border border-gray-200 bg-sky-50/30">
                         <input value={r.prev_port} list="shanghai-prev-ports"
@@ -766,8 +813,8 @@ export default function ShanghaiMgmtTab({ bookings, initialRows, initialPrevPort
                           placeholder="확보선복"
                           className="w-14 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white" />
                       </td>
-                      {/* Q 실마감물량 (자동) */}
-                      <td className={`${td} font-semibold text-blue-700`}>{b ? (calcTotalQty(b) || dash) : dash}</td>
+                      {/* Q 실마감물량 (자동 — 서류마감일 지난 건만 표시) */}
+                      <td className={`${td} font-semibold text-blue-700`}>{finalQtyAfterCutoff(b) || dash}</td>
                       {/* 비고 (수동) */}
                       <td className="px-1 py-1 border border-gray-200">
                         <input value={r.remarks}
