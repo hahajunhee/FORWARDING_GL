@@ -254,7 +254,7 @@ export default function BookingPageLayout({
                 <h2 className="text-lg font-bold text-gray-900">부킹장(모선)</h2>
                 <p className="text-sm text-gray-500">선사·모선명·VOYAGE가 같은 부킹을 한 행으로 병합해 관리합니다. 편집·저장 시 부킹장에 그대로 반영됩니다.</p>
               </div>
-              <VesselTable bookings={bookings} profiles={profiles} customLists={customLists} currentUserId={currentUserId} />
+              <VesselTable bookings={bookings} profiles={profiles} customLists={customLists} currentUserId={currentUserId} regionList={regionList} customerList={customerList} />
             </div>
           )}
           {activeTab === 'doc_cutoff' && (

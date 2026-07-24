@@ -23,7 +23,7 @@ interface BlankSailingRow {
 
 type DisplayRow = Booking | BlankSailingRow
 
-function getWeekNum(d: string | null | undefined): number | null {
+export function getWeekNum(d: string | null | undefined): number | null {
   if (!d) return null
   try {
     const p = parseISO(d)
@@ -50,7 +50,7 @@ function hasReeferContainer(b: Booking): boolean {
   return (b.qty_20_reefer || 0) > 0 || (b.qty_40_reefer || 0) > 0
 }
 
-function getWeekLabel(weekNum: number): string {
+export function getWeekLabel(weekNum: number): string {
   const start = addDays(WEEK1_START, (weekNum - 1) * 7)
   const end = addDays(start, 6)
   return `${weekNum}주차 (${format(start, 'M/d')}~${format(end, 'M/d')})`

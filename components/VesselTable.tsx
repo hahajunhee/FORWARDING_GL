@@ -2,11 +2,11 @@
 
 import { useMemo, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { format, parseISO, isValid } from 'date-fns'
+import { format, parseISO, isValid, differenceInCalendarDays } from 'date-fns'
 import type { Booking, Profile, CustomList } from '@/types'
 import { CARRIERS, DEFAULT_DESTINATIONS, MAJOR_PORTS } from '@/types'
 import { bulkSaveBookings } from '@/app/bookings/actions'
-import { formatContainers, normalizeDateInput } from './BookingTable'
+import { formatContainers, normalizeDateInput, calcTotalQty, getWeekNum, getWeekLabel } from './BookingTable'
 
 // ── 헬퍼 ──────────────────────────────────────────────────────────
 
@@ -37,6 +37,18 @@ type ColDef = {
   get: (b: Booking) => string
 }
 
+// 최종수량: 서류마감일이 지난 건만 TEU 표시 (부킹장과 동일 규칙)
+function finalQty(b: Booking): string {
+  if (!b.doc_cutoff_date) return ''
+  try {
+    const p = parseISO(b.doc_cutoff_date)
+    if (!isValid(p) || differenceInCalendarDays(p, new Date()) >= 0) return ''
+  } catch { return '' }
+  const q = calcTotalQty(b)
+  return q > 0 ? (q % 1 === 0 ? String(q) : q.toFixed(1)) : ''
+}
+
+// 부킹장과 동일한 열 구성 — 키 3개(선사·모선명·VOYAGE)만 맨 앞으로 이동
 const COLS: ColDef[] = [
   { key: 'carrier',              label: '선사',         minW: 90,  type: 'carrier', field: 'carrier',              get: b => b.carrier || '' },
   { key: 'vessel_name',          label: '모선명',       minW: 130, type: 'text',    field: 'vessel_name',          get: b => b.vessel_name || '' },
@@ -49,12 +61,17 @@ const COLS: ColDef[] = [
   { key: 'mqc',                  label: 'MQC',          minW: 60,  type: 'text',    field: 'mqc',                  get: b => b.mqc || '' },
   { key: 'customer_doc_handler', label: '고객사 서류',  minW: 90,  type: 'text',    field: 'customer_doc_handler', get: b => b.customer_doc_handler || '' },
   { key: 'forwarder_handler',    label: '포워더 담당',  minW: 90,  type: 'handler', field: 'forwarder_handler_id', get: b => b.forwarder_handler?.name || '' },
+  { key: 'handler_region',       label: '담당지역',     minW: 80,  type: 'ro',                                     get: b => b.forwarder_handler?.region || '' },
+  { key: 'handler_customers',    label: '담당고객사',   minW: 100, type: 'ro',                                     get: b => b.forwarder_handler?.customers || '' },
   { key: 'doc_cutoff_date',      label: '서류마감',     minW: 90,  type: 'date',    field: 'doc_cutoff_date',      get: b => b.doc_cutoff_date || '' },
   { key: 'proforma_etd',         label: 'PROFORMA ETD', minW: 95,  type: 'date',    field: 'proforma_etd',         get: b => b.proforma_etd || '' },
   { key: 'updated_etd',          label: 'UPDATED ETD',  minW: 95,  type: 'date',    field: 'updated_etd',          get: b => b.updated_etd || '' },
   { key: 'eta',                  label: 'ETA',          minW: 90,  type: 'date',    field: 'eta',                  get: b => b.eta || '' },
   { key: 'containers',           label: '컨테이너',     minW: 110, type: 'ro',                                     get: b => formatContainers(b) },
+  { key: 'final_qty',            label: '최종수량',     minW: 65,  type: 'ro',                                     get: b => finalQty(b) },
+  { key: 'con_pickup_qty',       label: '컨픽업수량',   minW: 75,  type: 'number',  field: 'con_pickup_qty',       get: b => b.con_pickup_qty ? String(b.con_pickup_qty) : '' },
   { key: 'remarks',              label: '비고',         minW: 140, type: 'text',    field: 'remarks',              get: b => b.remarks || '' },
+  { key: 'week_no',              label: '주차',         minW: 60,  type: 'ro',                                     get: b => { const w = getWeekNum(b.proforma_etd); return w !== null ? getWeekLabel(w) : '' } },
 ]
 
 type VGroup = {
@@ -68,9 +85,11 @@ interface Props {
   profiles: Profile[]
   customLists: CustomList[]
   currentUserId: string
+  regionList?: string[]
+  customerList?: string[]
 }
 
-export default function VesselTable({ bookings, profiles, customLists }: Props) {
+export default function VesselTable({ bookings, profiles, customLists, currentUserId, regionList = [], customerList = [] }: Props) {
   const router = useRouter()
   const [editMode, setEditMode] = useState(false)
   const [edits, setEdits] = useState<Record<string, Record<string, unknown>>>({})
@@ -117,6 +136,51 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
     const custom = customLists.filter(c => c.list_type === 'carrier').map(c => c.name)
     return Array.from(new Set([...CARRIERS, ...custom]))
   }, [customLists])
+  // 선사 색상 (설정에서 지정한 색)
+  const carrierColorMap = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const c of customLists) if (c.list_type === 'carrier' && c.color) m[c.name] = c.color
+    return m
+  }, [customLists])
+
+  // ── 필터 (부킹장 상단과 동일) ────────────────────────────────────
+  const [viewMode, setViewMode] = useState<'all' | 'mine'>('all')
+  const [carrierFilter, setCarrierFilter] = useState('')
+  const [handlerFilter, setHandlerFilter] = useState('')
+  const [regionFilter, setRegionFilter] = useState('')
+  const [customersFilter, setCustomersFilter] = useState('')
+  const [etdFrom, setEtdFrom] = useState('')
+  const [etdTo, setEtdTo] = useState('')
+  const [docFilter, setDocFilter] = useState(false)
+
+  const regionOptions = useMemo(() =>
+    regionList.length > 0 ? regionList
+      : Array.from(new Set(profiles.map(p => p.region).filter(Boolean))).sort() as string[]
+  , [regionList, profiles])
+  const customerOptions = useMemo(() =>
+    customerList.length > 0 ? customerList
+      : Array.from(new Set(profiles.flatMap(p => (p.customers || '').split(',').map(s => s.trim())).filter(Boolean))).sort()
+  , [customerList, profiles])
+
+  const filteredBookings = useMemo(() => bookings.filter(b => {
+    if (viewMode === 'mine' && b.forwarder_handler_id !== currentUserId) return false
+    if (carrierFilter && b.carrier !== carrierFilter) return false
+    if (handlerFilter === '__unassigned__' && b.forwarder_handler_id) return false
+    if (handlerFilter && handlerFilter !== '__unassigned__' && b.forwarder_handler_id !== handlerFilter) return false
+    if (regionFilter && b.forwarder_handler?.region !== regionFilter) return false
+    if (customersFilter && !b.forwarder_handler?.customers?.includes(customersFilter)) return false
+    const etd = b.proforma_etd
+    if (etdFrom && etd && etd < etdFrom) return false
+    if (etdTo && etd && etd > etdTo) return false
+    if (docFilter) {
+      if (!b.doc_cutoff_date) return false
+      try {
+        const diff = differenceInCalendarDays(parseISO(b.doc_cutoff_date), new Date())
+        if (diff < 0 || diff > 3) return false
+      } catch { return false }
+    }
+    return true
+  }), [bookings, viewMode, carrierFilter, handlerFilter, regionFilter, customersFilter, etdFrom, etdTo, docFilter, currentUserId])
 
   // 편집 오버레이 적용값
   const val = (b: Booking, col: ColDef): string => {
@@ -131,10 +195,10 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
     return col.get(b)
   }
 
-  // 그룹핑 (uniform 여부는 서버 데이터 기준 → 편집 중 구조 안 바뀜)
+  // 그룹핑 (uniform 여부는 서버 데이터 기준 → 편집 중 구조 안 바뀜, 필터 적용 후 그룹)
   const groups = useMemo(() => {
     const map = new Map<string, Booking[]>()
-    for (const b of bookings) {
+    for (const b of filteredBookings) {
       const k = vKey(b)
       if (!map.has(k)) map.set(k, [])
       map.get(k)!.push(b)
@@ -155,7 +219,7 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
       return (a.rows[0].vessel_name || '').localeCompare(b2.rows[0].vessel_name || '')
     })
     return list
-  }, [bookings])
+  }, [filteredBookings])
 
   // 검색 필터
   const filtered = useMemo(() => {
@@ -215,6 +279,13 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
       if (col.key === 'booking_no') return <span className="text-xs font-mono text-blue-700">{v || <span className="text-gray-300">-</span>}</span>
       if (col.key === 'seq_no') return <span className="text-xs font-mono font-semibold text-gray-500">{v || '-'}</span>
       if (col.key === 'containers') return <span className="text-xs font-mono text-blue-700">{v || <span className="text-gray-300">-</span>}</span>
+      if (col.key === 'carrier' && v) {
+        const cColor = carrierColorMap[v]
+        return <span className="inline-block px-2 py-0.5 rounded text-xs font-medium"
+          style={{ backgroundColor: cColor || '#f3f4f6', color: '#1f2937' }}>{v}</span>
+      }
+      if (col.key === 'final_qty') return <span className="text-xs font-semibold text-blue-700">{v || <span className="text-gray-300">-</span>}</span>
+      if (col.key === 'week_no') return <span className="text-xs text-indigo-700 font-medium">{v || <span className="text-gray-300">-</span>}</span>
       return <span className="text-xs">{v || <span className="text-gray-300">-</span>}</span>
     }
     const field = col.field
@@ -238,6 +309,9 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
         return <input className={inputCls} placeholder="YYYY-MM-DD" value={v}
           onChange={e => setCell(ids, field, e.target.value || null)}
           onBlur={e => setCell(ids, field, normalizeDateInput(e.target.value))} />
+      case 'number':
+        return <input type="number" min={0} className={inputCls} value={v}
+          onChange={e => setCell(ids, field, Math.max(0, Number(e.target.value) || 0))} />
       default:
         return <input className={inputCls} value={v} onChange={e => setCell(ids, field, e.target.value)} />
     }
@@ -250,6 +324,50 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
     <div className="space-y-3">
       <datalist id="vt-dests">{destinations.map(d => <option key={d} value={d} />)}</datalist>
       <datalist id="vt-ports">{ports.map(p => <option key={p} value={p} />)}</datalist>
+
+      {/* 필터 (부킹장 상단과 동일) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex rounded-lg overflow-hidden border border-gray-200">
+          <button onClick={() => setViewMode('all')}
+            className={`px-3 py-1.5 text-sm font-medium transition-colors ${viewMode === 'all' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>전체</button>
+          <button onClick={() => setViewMode('mine')}
+            className={`px-3 py-1.5 text-sm font-medium transition-colors ${viewMode === 'mine' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>내 담당</button>
+        </div>
+        <select value={carrierFilter} onChange={e => setCarrierFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">선사 전체</option>{carriers.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={handlerFilter} onChange={e => setHandlerFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">담당자 전체</option>
+          <option value="__unassigned__">미지정</option>
+          {profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={regionFilter} onChange={e => setRegionFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">지역 전체</option>{regionOptions.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <select value={customersFilter} onChange={e => setCustomersFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">담당고객사 전체</option>{customerOptions.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-400">ETD</span>
+          <input type="date" value={etdFrom} onChange={e => setEtdFrom(e.target.value)}
+            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <span className="text-gray-400 text-xs">~</span>
+          <input type="date" value={etdTo} onChange={e => setEtdTo(e.target.value)}
+            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        </div>
+        <button onClick={() => setDocFilter(v => !v)}
+          className={`px-2.5 py-1.5 text-xs rounded-lg font-medium transition-colors ${docFilter ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-gray-100 text-gray-600 hover:bg-red-50'}`}>
+          서류마감 D-3
+        </button>
+        {(carrierFilter || handlerFilter || regionFilter || customersFilter || etdFrom || etdTo || docFilter || viewMode === 'mine') && (
+          <button onClick={() => { setViewMode('all'); setCarrierFilter(''); setHandlerFilter(''); setRegionFilter(''); setCustomersFilter(''); setEtdFrom(''); setEtdTo(''); setDocFilter(false) }}
+            className="px-2.5 py-1.5 text-xs rounded-lg bg-amber-100 text-amber-700 hover:bg-amber-200 font-medium transition-colors">필터 초기화</button>
+        )}
+      </div>
 
       {/* 툴바 */}
       <div className="flex items-center gap-2 flex-wrap">
