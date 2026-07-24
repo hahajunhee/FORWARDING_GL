@@ -619,7 +619,7 @@ function BookingEntriesEditor({ entries, onChange }: {
 }
 
 // 날짜 입력 자동 변환: MMDD, MM/DD, YYYYMMDD → YYYY-MM-DD
-function normalizeDateInput(v: string): string | null {
+export function normalizeDateInput(v: string): string | null {
   if (!v) return null
   const t = v.trim()
   // MM/DD or M/D → 올해 연도 적용
