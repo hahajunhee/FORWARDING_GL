@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { format, parseISO, isValid } from 'date-fns'
 import type { Booking, Profile, CustomList } from '@/types'
@@ -79,6 +79,29 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState<{ mode: 'new' | 'copy' | 'keep'; source?: VGroup } | null>(null)
 
+  // ── 열 표시 설정 (localStorage 영속, null=전체) ──────────────────
+  const [visibleCols, setVisibleCols] = useState<string[] | null>(null)
+  const [colPanelOpen, setColPanelOpen] = useState(false)
+  useEffect(() => {
+    try { const s = localStorage.getItem('vt_cols'); if (s) setVisibleCols(JSON.parse(s)) } catch {}
+  }, [])
+  const saveVisible = (v: string[] | null) => {
+    setVisibleCols(v)
+    try { if (v) localStorage.setItem('vt_cols', JSON.stringify(v)); else localStorage.removeItem('vt_cols') } catch {}
+  }
+  // 모선명은 항상 표시
+  const shownCols = useMemo(() =>
+    visibleCols ? COLS.filter(c => c.key === 'vessel_name' || visibleCols.includes(c.key)) : COLS
+  , [visibleCols])
+
+  // ── 열 제목 클릭 정렬 (그룹 단위, 오름 → 내림 → 해제) ────────────
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null)
+  const handleHeaderSort = (key: string) => {
+    if (sort?.key !== key) setSort({ key, dir: 1 })
+    else if (sort.dir === 1) setSort({ key, dir: -1 })
+    else setSort(null)
+  }
+
   // 자동완성 옵션
   const destinations = useMemo(() => {
     const custom = customLists.filter(c => c.list_type === 'destination').map(c => c.name)
@@ -146,6 +169,21 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
       bookingNos(b).toLowerCase().includes(q)
     ))
   }, [groups, search])
+
+  // 헤더 정렬 적용 (그룹 대표값 = 첫 행 값 기준, 빈 값은 아래)
+  const sorted = useMemo(() => {
+    if (!sort) return filtered
+    const col = COLS.find(c => c.key === sort.key)
+    if (!col) return filtered
+    return [...filtered].sort((a, b) => {
+      const va = col.get(a.rows[0]) || '', vb = col.get(b.rows[0]) || ''
+      if (!va && !vb) return 0
+      if (!va) return 1
+      if (!vb) return -1
+      if (sort.key === 'seq_no') return ((parseFloat(va) || 0) - (parseFloat(vb) || 0)) * sort.dir
+      return va.localeCompare(vb, 'ko') * sort.dir
+    })
+  }, [filtered, sort])
 
   // 셀 편집 → 그룹(병합 셀) 또는 단일 행에 반영
   const setCell = (ids: string[], field: keyof Booking, value: unknown) => {
@@ -223,6 +261,41 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
           className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${editMode ? 'bg-amber-200 text-amber-900 border border-amber-400' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
           {editMode ? '편집 종료' : '편집'}
         </button>
+        {/* 열 표시 설정 */}
+        <div className="relative">
+          <button onClick={() => setColPanelOpen(v => !v)}
+            className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${visibleCols ? 'bg-indigo-100 text-indigo-700 border border-indigo-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+            열 설정{visibleCols ? ` (${shownCols.length}/${COLS.length})` : ''}
+          </button>
+          {colPanelOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setColPanelOpen(false)} />
+              <div className="absolute top-full left-0 mt-1 z-50 w-64 bg-white border border-gray-200 rounded-xl shadow-xl p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-gray-700">표시할 열 선택</span>
+                  <button onClick={() => saveVisible(null)}
+                    className="text-[11px] px-2 py-0.5 bg-gray-100 rounded hover:bg-gray-200 transition-colors">전체 표시</button>
+                </div>
+                <div className="grid grid-cols-2 gap-0.5 max-h-64 overflow-y-auto">
+                  {COLS.map(c => {
+                    const checked = !visibleCols || visibleCols.includes(c.key)
+                    const locked = c.key === 'vessel_name'
+                    return (
+                      <label key={c.key} className={`flex items-center gap-1.5 px-1.5 py-1 rounded text-xs ${locked ? 'text-gray-300' : 'text-gray-700 hover:bg-gray-50 cursor-pointer'}`}>
+                        <input type="checkbox" checked={checked} disabled={locked} className="rounded"
+                          onChange={() => {
+                            const cur = visibleCols ?? COLS.map(x => x.key)
+                            saveVisible(checked ? cur.filter(k => k !== c.key) : [...cur, c.key])
+                          }} />
+                        {c.label}
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
         {editMode && dirtyCount > 0 && (
           <>
             <button onClick={handleSave} disabled={saving}
@@ -246,14 +319,21 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
           <table className="text-xs border-collapse w-full">
             <thead className="sticky top-0 z-10">
               <tr>
-                {COLS.map(c => <th key={c.key} className={th} style={{ minWidth: c.minW }}>{c.label}</th>)}
+                {shownCols.map(c => (
+                  <th key={c.key} onClick={() => handleHeaderSort(c.key)}
+                    className={`${th} cursor-pointer select-none hover:brightness-95`}
+                    style={{ minWidth: c.minW }}
+                    title="클릭: 오름차순 → 내림차순 → 해제">
+                    {c.label}{sort?.key === c.key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}
+                  </th>
+                ))}
                 <th className={th} style={{ minWidth: 110 }}>관리</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(g => g.rows.map((b, ri) => (
+              {sorted.map(g => g.rows.map((b, ri) => (
                 <tr key={b.id}>
-                  {COLS.map(c => {
+                  {shownCols.map(c => {
                     const isUniform = g.uniform[c.key]
                     if (isUniform && ri > 0) return null // 병합 — 첫 행에서만 렌더
                     const ids = isUniform ? g.rows.map(r => r.id) : [b.id]
@@ -284,8 +364,8 @@ export default function VesselTable({ bookings, profiles, customLists }: Props) 
                   )}
                 </tr>
               )))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={COLS.length + 1} className="text-center py-16 text-gray-400 text-sm">표시할 부킹이 없습니다.</td></tr>
+              {sorted.length === 0 && (
+                <tr><td colSpan={shownCols.length + 1} className="text-center py-16 text-gray-400 text-sm">표시할 부킹이 없습니다.</td></tr>
               )}
             </tbody>
           </table>
