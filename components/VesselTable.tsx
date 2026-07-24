@@ -3,9 +3,9 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { format, parseISO, isValid, differenceInCalendarDays } from 'date-fns'
-import type { Booking, Profile, CustomList } from '@/types'
+import type { Booking, Profile, CustomList, VesselPrefs } from '@/types'
 import { CARRIERS, DEFAULT_DESTINATIONS, MAJOR_PORTS } from '@/types'
-import { bulkSaveBookings } from '@/app/bookings/actions'
+import { bulkSaveBookings, saveVesselPrefs } from '@/app/bookings/actions'
 import { formatContainers, normalizeDateInput, calcTotalQty, getWeekNum, getWeekLabel } from './BookingTable'
 
 // ── 헬퍼 ──────────────────────────────────────────────────────────
@@ -80,6 +80,24 @@ type VGroup = {
   uniform: Record<string, boolean> // colKey → 그룹 내 값 동일 여부
 }
 
+// 저장된 열 순서를 현재 열 목록과 동기화 (새 열은 기본 위치에 삽입)
+function normalizeOrder(stored: string[] | null | undefined): string[] {
+  const all = COLS.map(c => c.key)
+  if (!stored || stored.length === 0) return all
+  const valid = stored.filter(k => all.includes(k))
+  for (const k of all) {
+    if (valid.includes(k)) continue
+    const defIdx = all.indexOf(k)
+    let at = valid.length
+    for (let i = defIdx - 1; i >= 0; i--) {
+      const vi = valid.indexOf(all[i])
+      if (vi !== -1) { at = vi + 1; break }
+    }
+    valid.splice(at, 0, k)
+  }
+  return valid
+}
+
 interface Props {
   bookings: Booking[]
   profiles: Profile[]
@@ -87,9 +105,10 @@ interface Props {
   currentUserId: string
   regionList?: string[]
   customerList?: string[]
+  initialPrefs?: VesselPrefs | null
 }
 
-export default function VesselTable({ bookings, profiles, customLists, currentUserId, regionList = [], customerList = [] }: Props) {
+export default function VesselTable({ bookings, profiles, customLists, currentUserId, regionList = [], customerList = [], initialPrefs = null }: Props) {
   const router = useRouter()
   const [editMode, setEditMode] = useState(false)
   const [edits, setEdits] = useState<Record<string, Record<string, unknown>>>({})
@@ -98,20 +117,52 @@ export default function VesselTable({ bookings, profiles, customLists, currentUs
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState<{ mode: 'new' | 'copy' | 'keep'; source?: VGroup } | null>(null)
 
-  // ── 열 표시 설정 (localStorage 영속, null=전체) ──────────────────
-  const [visibleCols, setVisibleCols] = useState<string[] | null>(null)
+  // ── 열 순서·표시 설정 (계정 단위 DB 저장 — 어느 컴퓨터에서도 유지) ──
+  const [colOrder, setColOrder] = useState<string[]>(() => normalizeOrder(initialPrefs?.order))
+  const [visibleCols, setVisibleCols] = useState<string[] | null>(initialPrefs?.visible ?? null)
   const [colPanelOpen, setColPanelOpen] = useState(false)
+  const [prefsError, setPrefsError] = useState<string | null>(null)
+  // DB 설정이 없을 때만 localStorage 백업 사용 (구버전 호환)
   useEffect(() => {
-    try { const s = localStorage.getItem('vt_cols'); if (s) setVisibleCols(JSON.parse(s)) } catch {}
+    if (initialPrefs) return
+    try {
+      const s = localStorage.getItem('vt_prefs') || localStorage.getItem('vt_cols')
+      if (s) {
+        const p = JSON.parse(s)
+        if (Array.isArray(p)) setVisibleCols(p) // 구버전(vt_cols) 형식
+        else { setColOrder(normalizeOrder(p.order)); setVisibleCols(p.visible ?? null) }
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  const saveVisible = (v: string[] | null) => {
-    setVisibleCols(v)
-    try { if (v) localStorage.setItem('vt_cols', JSON.stringify(v)); else localStorage.removeItem('vt_cols') } catch {}
+  // 변경 즉시 DB(계정)에 저장 + localStorage 백업
+  const persistPrefs = (order: string[], visible: string[] | null) => {
+    try { localStorage.setItem('vt_prefs', JSON.stringify({ order, visible })) } catch {}
+    saveVesselPrefs({ order, visible }).then(r => setPrefsError(r.error))
   }
-  // 모선명은 항상 표시
-  const shownCols = useMemo(() =>
-    visibleCols ? COLS.filter(c => c.key === 'vessel_name' || visibleCols.includes(c.key)) : COLS
-  , [visibleCols])
+  const applyOrder = (order: string[]) => { setColOrder(order); persistPrefs(order, visibleCols) }
+  const saveVisible = (v: string[] | null) => { setVisibleCols(v); persistPrefs(colOrder, v) }
+
+  // 열 드래그 이동
+  const [dragCol, setDragCol] = useState<string | null>(null)
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null)
+  const moveCol = (src: string | null, dst: string) => {
+    if (!src || src === dst) return
+    const next = [...colOrder]
+    const si = next.indexOf(src), di = next.indexOf(dst)
+    if (si === -1 || di === -1) return
+    next.splice(si, 1)
+    next.splice(di, 0, src)
+    applyOrder(next)
+  }
+
+  // 순서 적용 + 표시 필터 (모선명은 항상 표시)
+  const shownCols = useMemo(() => {
+    const byKey = new Map(COLS.map(c => [c.key, c]))
+    return colOrder
+      .map(k => byKey.get(k))
+      .filter((c): c is ColDef => !!c && (c.key === 'vessel_name' || !visibleCols || visibleCols.includes(c.key)))
+  }, [colOrder, visibleCols])
 
   // ── 열 제목 클릭 정렬 (그룹 단위, 오름 → 내림 → 해제) ────────────
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null)
@@ -390,26 +441,35 @@ export default function VesselTable({ bookings, profiles, customLists, currentUs
               <div className="fixed inset-0 z-40" onClick={() => setColPanelOpen(false)} />
               <div className="absolute top-full left-0 mt-1 z-50 w-64 bg-white border border-gray-200 rounded-xl shadow-xl p-3">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-gray-700">표시할 열 선택</span>
-                  <button onClick={() => saveVisible(null)}
-                    className="text-[11px] px-2 py-0.5 bg-gray-100 rounded hover:bg-gray-200 transition-colors">전체 표시</button>
+                  <span className="text-xs font-bold text-gray-700">표시 열 · 순서 (계정에 저장)</span>
+                  <button onClick={() => { saveVisible(null); applyOrder(COLS.map(c => c.key)) }}
+                    className="text-[11px] px-2 py-0.5 bg-gray-100 rounded hover:bg-gray-200 transition-colors">기본값</button>
                 </div>
-                <div className="grid grid-cols-2 gap-0.5 max-h-64 overflow-y-auto">
-                  {COLS.map(c => {
+                <div className="space-y-0.5 max-h-72 overflow-y-auto">
+                  {colOrder.map((k, idx) => {
+                    const c = COLS.find(x => x.key === k)
+                    if (!c) return null
                     const checked = !visibleCols || visibleCols.includes(c.key)
                     const locked = c.key === 'vessel_name'
                     return (
-                      <label key={c.key} className={`flex items-center gap-1.5 px-1.5 py-1 rounded text-xs ${locked ? 'text-gray-300' : 'text-gray-700 hover:bg-gray-50 cursor-pointer'}`}>
-                        <input type="checkbox" checked={checked} disabled={locked} className="rounded"
-                          onChange={() => {
-                            const cur = visibleCols ?? COLS.map(x => x.key)
-                            saveVisible(checked ? cur.filter(k => k !== c.key) : [...cur, c.key])
-                          }} />
-                        {c.label}
-                      </label>
+                      <div key={c.key} className="flex items-center gap-1.5 px-1.5 py-0.5 rounded hover:bg-gray-50">
+                        <label className={`flex items-center gap-1.5 flex-1 text-xs ${locked ? 'text-gray-300' : 'text-gray-700 cursor-pointer'}`}>
+                          <input type="checkbox" checked={checked} disabled={locked} className="rounded"
+                            onChange={() => {
+                              const cur = visibleCols ?? COLS.map(x => x.key)
+                              saveVisible(checked ? cur.filter(x => x !== c.key) : [...cur, c.key])
+                            }} />
+                          {c.label}
+                        </label>
+                        <button onClick={() => { if (idx > 0) { const n = [...colOrder]; ;[n[idx - 1], n[idx]] = [n[idx], n[idx - 1]]; applyOrder(n) } }}
+                          disabled={idx === 0} className="text-gray-400 hover:text-gray-700 disabled:opacity-20 text-sm w-4">↑</button>
+                        <button onClick={() => { if (idx < colOrder.length - 1) { const n = [...colOrder]; ;[n[idx], n[idx + 1]] = [n[idx + 1], n[idx]]; applyOrder(n) } }}
+                          disabled={idx === colOrder.length - 1} className="text-gray-400 hover:text-gray-700 disabled:opacity-20 text-sm w-4">↓</button>
+                      </div>
                     )
                   })}
                 </div>
+                {prefsError && <p className="text-[11px] text-red-600 mt-1.5">{prefsError}</p>}
               </div>
             </>
           )}
@@ -429,6 +489,7 @@ export default function VesselTable({ bookings, profiles, customLists, currentUs
       </div>
       <p className="text-[11px] text-gray-400">
         선사·모선명·VOYAGE가 같은 부킹을 한 그룹으로 병합 표시합니다. 병합된 셀을 편집하면 그룹 전체가, 분리된 셀은 해당 행만 수정됩니다. 저장 시 부킹장에도 동일하게 반영됩니다.
+        열 제목을 <b>드래그</b>하면 위치가 바뀌고, 열 순서·표시 설정은 <b>계정에 저장</b>되어 어느 컴퓨터에서든 유지됩니다.
       </p>
 
       {/* 표 */}
@@ -439,9 +500,14 @@ export default function VesselTable({ bookings, profiles, customLists, currentUs
               <tr>
                 {shownCols.map(c => (
                   <th key={c.key} onClick={() => handleHeaderSort(c.key)}
-                    className={`${th} cursor-pointer select-none hover:brightness-95`}
+                    draggable
+                    onDragStart={() => setDragCol(c.key)}
+                    onDragOver={e => { e.preventDefault(); if (dragOverCol !== c.key) setDragOverCol(c.key) }}
+                    onDrop={e => { e.preventDefault(); moveCol(dragCol, c.key); setDragCol(null); setDragOverCol(null) }}
+                    onDragEnd={() => { setDragCol(null); setDragOverCol(null) }}
+                    className={`${th} cursor-pointer select-none hover:brightness-95 ${dragOverCol === c.key && dragCol !== c.key ? 'bg-indigo-100' : ''} ${dragCol === c.key ? 'opacity-50' : ''}`}
                     style={{ minWidth: c.minW }}
-                    title="클릭: 오름차순 → 내림차순 → 해제">
+                    title="클릭: 정렬 (오름 → 내림 → 해제) · 드래그: 열 위치 이동">
                     {c.label}{sort?.key === c.key ? (sort.dir === 1 ? ' ↑' : ' ↓') : ''}
                   </th>
                 ))}

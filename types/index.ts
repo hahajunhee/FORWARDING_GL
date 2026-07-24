@@ -27,12 +27,18 @@ export const DEFAULT_TABLE_STYLE: TableStyle = {
   groupBorderWidth: 2,
 }
 
+export interface VesselPrefs {
+  order?: string[]
+  visible?: string[] | null
+}
+
 export interface Profile {
   id: string
   email: string
   name: string
   column_order: string[] | null
   pinned_columns: string[] | null
+  vessel_prefs?: VesselPrefs | null
   doc_template: string | null
   color: string | null
   region: string | null
