@@ -814,6 +814,8 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
                 .flatMap(e => (e.cis ?? (e.ci ? [e.ci] : [])).map(c => (c || '').trim()))
                 .filter(Boolean).join('\n')
               change.extra_data = { ...((row.extra_data as Record<string, string>) || {}), [ciCol.key]: joined }
+              // C/I가 하나라도 입력되면 마감 자동 체크
+              if (joined && !row.is_closed) change.is_closed = true
             }
             onChange(change)
           }}
@@ -1875,7 +1877,10 @@ export default function BookingTable({
       default: {
         const cd = customColumns.find(c => c.key === col)
         if (cd && col !== 'custom_mmgcysit') {
-          return { extra_data: { [col]: v } as Record<string, string> }
+          const change: Partial<Booking> = { extra_data: { [col]: v } as Record<string, string> }
+          // C/I 열에 값이 들어오면 마감 자동 체크
+          if (isCiLabel(cd.label) && v.trim()) change.is_closed = true
+          return change
         }
         return null
       }
