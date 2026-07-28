@@ -2211,6 +2211,7 @@ export default function BookingTable({
       <tr key={booking.id}
         className="transition-colors"
         data-bid={booking.id}
+        data-focus={isFocusRow ? 'true' : undefined}
         data-closed={effClosed ? 'true' : undefined}
         style={{
           backgroundColor: isFocusRow ? '#fef08a' : isSelected ? '#eff6ff' : (handlerColor || undefined),

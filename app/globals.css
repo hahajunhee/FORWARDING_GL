@@ -103,6 +103,12 @@ table tbody tr:hover td {
   background-color: #eef2ff !important;
 }
 
+/* 편집 중 포커스 행(노란색) — 호버보다 우선, 항상 노랗게 유지 */
+table tbody tr[data-focus="true"] td,
+table tbody tr[data-focus="true"]:hover td {
+  background-color: #fef08a !important;
+}
+
 /* 드래그 범위 선택 중: hover 억제 */
 .is-drag-selecting table tbody tr:hover td {
   background-color: unset !important;
@@ -122,8 +128,11 @@ tr[data-closed="true"] td span,
 tr[data-closed="true"] td div {
   color: #334155 !important;
 }
+/* 뱃지 무채색화 — 성능을 위해 자주 쓰는 클래스만 지정 ([class*=] 사용 금지) */
 tr[data-closed="true"] td .bg-blue-50,
-tr[data-closed="true"] td [class*="bg-"] {
+tr[data-closed="true"] td .bg-emerald-50,
+tr[data-closed="true"] td .bg-red-50,
+tr[data-closed="true"] td .bg-yellow-50 {
   background-color: transparent !important;
 }
 
