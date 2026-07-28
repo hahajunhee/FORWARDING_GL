@@ -2,7 +2,8 @@ export interface BookingEntry {
   no: string
   ctr_type: string
   ctr_qty: number
-  ci?: string // C/I 번호 (부킹번호당 1개, 서류마감 후 입력)
+  ci?: string     // (구버전 호환) 첫 번째 C/I
+  cis?: string[]  // C/I 번호 목록 (부킹번호당 여러 개 가능, 서류마감 후 입력)
 }
 
 export interface ColumnDefinition {

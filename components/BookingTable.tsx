@@ -602,15 +602,35 @@ function BookingEntriesEditor({ entries, onChange, showCi = false }: {
             onChange={e => handleChange(i, 'ctr_qty', parseInt(e.target.value) || 0)}
             onBlur={e => { if (!parseInt(e.target.value)) handleChange(i, 'ctr_qty', 1) }}
           />
-          {showCi && (
-            <input
-              className="w-24 border border-emerald-200 bg-emerald-50/40 rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:border-emerald-400"
-              value={entry.ci || ''}
-              onChange={e => handleChange(i, 'ci', e.target.value)}
-              placeholder="C/I"
-              title="C/I 번호 (부킹번호당 1개)"
-            />
-          )}
+          {showCi && (() => {
+            // C/I 여러 개 지원 (구버전 단일 ci 호환)
+            const cis = entry.cis ?? (entry.ci ? [entry.ci] : [])
+            const shown = cis.length > 0 ? cis : ['']
+            const setCis = (next: string[]) =>
+              onChange(entries.map((e, idx) => idx === i ? { ...e, cis: next, ci: next[0] || '' } : e))
+            return (
+              <>
+                {shown.map((c, ciIdx) => (
+                  <span key={ciIdx} className="flex items-center gap-0.5">
+                    <input
+                      className="w-20 border border-emerald-200 bg-emerald-50/40 rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:border-emerald-400"
+                      value={c}
+                      onChange={e => { const n = [...shown]; n[ciIdx] = e.target.value; setCis(n) }}
+                      placeholder="C/I"
+                      title="C/I 번호"
+                    />
+                    {shown.length > 1 && (
+                      <button onClick={() => setCis(shown.filter((_, x) => x !== ciIdx))}
+                        className="text-emerald-300 hover:text-red-500 text-[10px] leading-none">✕</button>
+                    )}
+                  </span>
+                ))}
+                <button onClick={() => setCis([...shown, ''])}
+                  className="text-emerald-500 hover:text-emerald-700 text-sm leading-none px-0.5 font-bold"
+                  title="이 부킹번호에 C/I 추가">＋</button>
+              </>
+            )
+          })()}
           {entries.length > 1 && (
             <button onClick={() => handleRemove(i)}
               className="text-red-400 hover:text-red-600 text-xs leading-none px-0.5">✕</button>
@@ -754,9 +774,11 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
               booking_entries: newEntries,
               booking_no: newEntries[0]?.no || '',
             }
-            // C/I 열에는 항목별 C/I를 " / "로 합쳐서 저장 (열 표시·엑셀 반영용)
+            // C/I 열에는 전체 C/I를 " / "로 합쳐서 저장 (열 표시·엑셀 반영용)
             if (ciCol) {
-              const joined = newEntries.map(e => (e.ci || '').trim()).filter(Boolean).join(' / ')
+              const joined = newEntries
+                .flatMap(e => (e.cis ?? (e.ci ? [e.ci] : [])).map(c => (c || '').trim()))
+                .filter(Boolean).join(' / ')
               change.extra_data = { ...((row.extra_data as Record<string, string>) || {}), [ciCol.key]: joined }
             }
             onChange(change)
@@ -837,12 +859,15 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
       if (booking.booking_entries && booking.booking_entries.length > 0) {
         return (
           <div className="space-y-0.5">
-            {booking.booking_entries.map((e, i) => (
-              <span key={i} className="block font-mono font-medium text-blue-700 text-xs whitespace-nowrap">
-                {e.no || <span className="text-gray-300">-</span>}
-                {e.ci && <span className="text-emerald-600 font-semibold ml-1.5" title="C/I">{e.ci}</span>}
-              </span>
-            ))}
+            {booking.booking_entries.map((e, i) => {
+              const cis = (e.cis ?? (e.ci ? [e.ci] : [])).map(c => (c || '').trim()).filter(Boolean)
+              return (
+                <span key={i} className="block font-mono font-medium text-blue-700 text-xs whitespace-nowrap">
+                  {e.no || <span className="text-gray-300">-</span>}
+                  {cis.length > 0 && <span className="text-emerald-600 font-semibold ml-1.5" title="C/I">{cis.join(' / ')}</span>}
+                </span>
+              )
+            })}
           </div>
         )
       }
