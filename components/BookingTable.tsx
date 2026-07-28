@@ -808,14 +808,15 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
               booking_entries: newEntries,
               booking_no: newEntries[0]?.no || '',
             }
+            // C/I가 하나라도 입력되면 마감 자동 체크 (C/I 커스텀 열 유무와 무관)
+            const hasCi = newEntries.some(e => (e.cis ?? (e.ci ? [e.ci] : [])).some(c => c && c.trim()))
+            if (hasCi && !row.is_closed) change.is_closed = true
             // C/I 열에는 전체 C/I를 줄바꿈으로 합쳐 저장 (한 줄 = C/I 하나, 엑셀 복사 편의)
             if (ciCol) {
               const joined = newEntries
                 .flatMap(e => (e.cis ?? (e.ci ? [e.ci] : [])).map(c => (c || '').trim()))
                 .filter(Boolean).join('\n')
               change.extra_data = { ...((row.extra_data as Record<string, string>) || {}), [ciCol.key]: joined }
-              // C/I가 하나라도 입력되면 마감 자동 체크
-              if (joined && !row.is_closed) change.is_closed = true
             }
             onChange(change)
           }}
@@ -873,9 +874,14 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
       if (cd) {
         const value = (row.extra_data as Record<string, string> | null)?.[colKey] || ''
         return <input className={cls} value={value}
-          onChange={e => onChange({
-            extra_data: { ...((row.extra_data as Record<string, string>) || {}), [colKey]: e.target.value }
-          })}
+          onChange={e => {
+            const change: Partial<Booking> = {
+              extra_data: { ...((row.extra_data as Record<string, string>) || {}), [colKey]: e.target.value },
+            }
+            // C/I 열에 직접 입력해도 마감 자동 체크
+            if (isCiLabel(cd.label) && e.target.value.trim() && !row.is_closed) change.is_closed = true
+            onChange(change)
+          }}
           placeholder={cd.label} />
       }
       return null
@@ -2140,7 +2146,9 @@ export default function BookingTable({
     const hasEdits = Object.keys(edits).length > 0
     const err = rowErrors[booking.id]
     // 마감완료 행은 어두운 회색 음영이 최우선 (도착지 색상보다 우선)
-    const handlerColor = booking.is_closed ? '#cbd5e1' : (destinationColorMap[booking.final_destination || ''] || '')
+    // 편집 중(저장 전)에도 즉시 반영되도록 merged(편집 오버레이) 기준
+    const effClosed = !!merged.is_closed
+    const handlerColor = effClosed ? '#cbd5e1' : (destinationColorMap[booking.final_destination || ''] || '')
     const isOwnBooking = canManageBooking(booking)
 
     const myDest = booking.final_destination || ''
@@ -2197,7 +2205,7 @@ export default function BookingTable({
     return (
       <tr key={booking.id}
         className="transition-colors"
-        data-closed={booking.is_closed ? 'true' : undefined}
+        data-closed={effClosed ? 'true' : undefined}
         style={{
           backgroundColor: isSelected ? '#eff6ff' : (handlerColor || undefined),
           ...(editMode && hasEdits ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
