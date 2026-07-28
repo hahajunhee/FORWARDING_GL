@@ -93,6 +93,9 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   remarks:              { label: '비고',            minW: 160 },
   week_no:              { label: '주차',             minW: 150 },
   is_closed:            { label: '마감',             minW: 60  },
+  ci_qty:               { label: 'CI_수량',          minW: 80  },
+  ci_dest:              { label: 'CI_도착지',        minW: 100 },
+  ci_vessel:            { label: 'CI_모선명',        minW: 120 },
 }
 
 // pinnedColumns 기준으로 sticky left 오프셋 계산 (colWidths 반영)
@@ -261,6 +264,9 @@ function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]
   switch (col) {
     case 'seq_no': return String(b.seq_no ?? 0).padStart(12, '0')
     case 'is_closed': return b.is_closed ? '1' : '0'
+    case 'ci_qty': return b.ci_qty || ''
+    case 'ci_dest': return b.ci_dest || ''
+    case 'ci_vessel': return b.ci_vessel || ''
     case 'booking_no': return (b.booking_entries && b.booking_entries.length > 0) ? b.booking_entries[0].no : (b.booking_no || '')
     case 'final_destination': return b.final_destination || ''
     case 'discharge_port': return b.discharge_port || ''
@@ -371,6 +377,9 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
       { key: 'con_pickup_qty',       label: '컨픽업수량',      type: 'number', width: 10 },
       { key: 'remarks',              label: '비고',            type: 'text',   width: 24 },
       { key: 'is_closed',            label: '마감',            type: 'text',   width: 7 },
+      { key: 'ci_qty',               label: 'CI_수량',         type: 'text',   width: 10 },
+      { key: 'ci_dest',              label: 'CI_도착지',       type: 'text',   width: 12 },
+      { key: 'ci_vessel',            label: 'CI_모선명',       type: 'text',   width: 14 },
       ...customColumns.map<ColDef>(cd => ({
         key: `__custom_${cd.key}`,
         label: cd.label,
@@ -424,6 +433,9 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         }
         case 'remarks':              return b.remarks || ''
         case 'is_closed':            return b.is_closed ? '마감' : ''
+        case 'ci_qty':               return b.ci_qty || ''
+        case 'ci_dest':              return b.ci_dest || ''
+        case 'ci_vessel':            return b.ci_vessel || ''
         default: {
           if (col.key.startsWith('__custom_')) {
             const ckey = col.key.replace('__custom_', '')
@@ -488,8 +500,8 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         const baseStyle: Record<string, unknown> = {
           font: { sz: 10, name: '맑은 고딕' },
           fill: rowFill,
-          // 커스텀 열(C/I 등)은 셀 내 줄바꿈 표시를 위해 wrapText
-          alignment: { vertical: 'center', wrapText: col.key === 'remarks' || col.key === 'containers' || col.key.startsWith('__custom_') },
+          // 커스텀 열(C/I 등)·CI 업로드 열은 셀 내 줄바꿈 표시를 위해 wrapText
+          alignment: { vertical: 'center', wrapText: col.key === 'remarks' || col.key === 'containers' || col.key.startsWith('__custom_') || col.key.startsWith('ci_') },
           border,
         }
         // 정렬: 숫자·날짜는 가운데, 텍스트는 좌측
@@ -788,16 +800,23 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
           마감
         </label>
       )
+    case 'ci_qty':
+      return <input autoFocus={autoFocus} className={cls} value={row.ci_qty || ''} onChange={e => onChange({ ci_qty: e.target.value })} placeholder="CI_수량" />
+    case 'ci_dest':
+      return <input autoFocus={autoFocus} className={cls} value={row.ci_dest || ''} onChange={e => onChange({ ci_dest: e.target.value })} placeholder="CI_도착지" />
+    case 'ci_vessel':
+      return <input autoFocus={autoFocus} className={cls} value={row.ci_vessel || ''} onChange={e => onChange({ ci_vessel: e.target.value })} placeholder="CI_모선명" />
     case 'booking_no': {
       const entries: BookingEntry[] = (row.booking_entries as BookingEntry[] | undefined) ||
         (row.booking_no ? [{ no: row.booking_no as string, ctr_type: '20', ctr_qty: 1 }] : [{ no: '', ctr_type: '20', ctr_qty: 1 }])
       // 서류마감이 지난 행: 부킹번호당 C/I 입력칸을 같은 행 우측에 표시
       // 값은 booking_entries[].ci에 저장 + 커스텀 'C/I' 열(extra_data)에도 합쳐서 동기화
       const ciCol = customColumns.find(cd => isCiLabel(cd.label))
+      // 서류마감 당일부터 C/I 입력칸 표시
       const cutoffPassed = (() => {
         const d = row.doc_cutoff_date
         if (!d) return false
-        try { const p = parseISO(d); return isValid(p) && differenceInCalendarDays(p, new Date()) < 0 } catch { return false }
+        try { const p = parseISO(d); return isValid(p) && differenceInCalendarDays(p, new Date()) <= 0 } catch { return false }
       })()
       return (
         <BookingEntriesEditor
@@ -901,6 +920,12 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
       return booking.is_closed
         ? <span className="inline-block px-1.5 py-0.5 rounded text-[11px] font-bold text-white" style={{ backgroundColor: '#475569' }}>마감</span>
         : <span className="text-gray-300 text-xs">-</span>
+    case 'ci_qty':
+    case 'ci_dest':
+    case 'ci_vessel': {
+      const v = (booking[colKey] as string | null) || ''
+      return <span className="text-xs whitespace-pre-line">{v || <span className="text-gray-300">-</span>}</span>
+    }
     case 'booking_no':
       if (booking.booking_entries && booking.booking_entries.length > 0) {
         return (
@@ -1105,6 +1130,8 @@ export default function BookingTable({
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [bulkClosing, setBulkClosing] = useState(false)
+  const [ciUploading, setCiUploading] = useState(false)
+  const ciFileRef = useRef<HTMLInputElement>(null)
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
   const [bulkEditCol, setBulkEditCol] = useState('')
   const [bulkEditVal, setBulkEditVal] = useState('')
@@ -1311,6 +1338,9 @@ export default function BookingTable({
       case 'con_pickup_qty': return booking.con_pickup_qty ? String(booking.con_pickup_qty) : ''
       case 'remarks': return booking.remarks || ''
       case 'is_closed': return booking.is_closed ? '마감' : ''
+      case 'ci_qty': return booking.ci_qty || ''
+      case 'ci_dest': return booking.ci_dest || ''
+      case 'ci_vessel': return booking.ci_vessel || ''
       default: {
         const cd = customColumns.find(c => c.key === col)
         if (cd) {
@@ -2062,6 +2092,82 @@ export default function BookingTable({
     }
   }
 
+  // C/I 엑셀 업로드: 엑셀의 C/I 번호와 부킹의 C/I를 매칭 →
+  // CI_수량·CI_도착지·CI_모선명 열 자동 업데이트
+  const handleCiExcelUpload = async (file: File) => {
+    setCiUploading(true)
+    try {
+      const XLSX = await import('xlsx')
+      const wb = XLSX.read(await file.arrayBuffer())
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      if (!ws) { alert('엑셀에서 시트를 찾을 수 없습니다.'); return }
+      const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][]
+      const norm = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^A-Z가-힣0-9]/g, '')
+      // 헤더 행 탐색 (상위 10행): C/I 열 필수, 수량·도착지·모선명 열 자동 인식
+      let hRow = -1, ciIdx = -1, qtyIdx = -1, destIdx = -1, vesIdx = -1
+      for (let r = 0; r < Math.min(grid.length, 10); r++) {
+        const row = grid[r] || []
+        const ci = row.findIndex(c => { const n = norm(c); return n === 'CI' || n === 'CINO' || n === 'CI번호' })
+        if (ci === -1) continue
+        hRow = r; ciIdx = ci
+        qtyIdx = row.findIndex(c => { const n = norm(c); return n.includes('수량') || n.includes('QTY') })
+        destIdx = row.findIndex(c => { const n = norm(c); return n.includes('도착지') || n.includes('DEST') })
+        vesIdx = row.findIndex(c => { const n = norm(c); return n.includes('모선') || n.includes('선명') || n.includes('VESSEL') })
+        break
+      }
+      if (hRow === -1) {
+        alert("엑셀 헤더에서 'C/I' 열을 찾지 못했습니다.\n첫 시트 상단에 C/I · 수량 · 도착지 · 모선명 열 제목이 필요합니다.")
+        return
+      }
+      // C/I 번호 → 값 맵
+      const map = new Map<string, { qty: string; dest: string; vessel: string }>()
+      for (let r = hRow + 1; r < grid.length; r++) {
+        const row = grid[r] || []
+        const ci = String(row[ciIdx] ?? '').trim().toUpperCase()
+        if (!ci) continue
+        map.set(ci, {
+          qty: qtyIdx >= 0 ? String(row[qtyIdx] ?? '').trim() : '',
+          dest: destIdx >= 0 ? String(row[destIdx] ?? '').trim() : '',
+          vessel: vesIdx >= 0 ? String(row[vesIdx] ?? '').trim() : '',
+        })
+      }
+      if (map.size === 0) { alert('엑셀에서 C/I 데이터 행을 찾지 못했습니다.'); return }
+      // 부킹 매칭 (부킹의 C/I 번호 기준, 여러 개면 줄바꿈으로 순서대로)
+      const editsList: { id: string; data: Record<string, unknown> }[] = []
+      const usedCis = new Set<string>()
+      for (const b of bookings) {
+        const cis = (b.booking_entries || [])
+          .flatMap(e => (e.cis ?? (e.ci ? [e.ci] : [])))
+          .map(c => (c || '').trim().toUpperCase()).filter(Boolean)
+        const hit = cis.filter(c => map.has(c))
+        if (hit.length === 0) continue
+        hit.forEach(c => usedCis.add(c))
+        editsList.push({ id: b.id, data: {
+          ci_qty: hit.map(c => map.get(c)!.qty).filter(Boolean).join('\n'),
+          ci_dest: hit.map(c => map.get(c)!.dest).filter(Boolean).join('\n'),
+          ci_vessel: hit.map(c => map.get(c)!.vessel).filter(Boolean).join('\n'),
+        } })
+      }
+      if (editsList.length === 0) {
+        alert(`매칭된 부킹이 없습니다.\n엑셀 C/I ${map.size}건 중 부킹장의 C/I와 일치하는 번호가 없습니다.\n(먼저 부킹번호 편집에서 C/I를 입력해두어야 매칭됩니다)`)
+        return
+      }
+      const unmatched = map.size - usedCis.size
+      if (!confirm(`부킹 ${editsList.length}건에 CI_수량·CI_도착지·CI_모선명을 업데이트합니다.${unmatched > 0 ? `\n(엑셀 C/I ${unmatched}건은 부킹장에서 찾지 못해 제외)` : ''}\n계속할까요?`)) return
+      const { errors } = await bulkSaveBookings(editsList, [])
+      if (Object.keys(errors).length > 0) {
+        alert('저장 실패: ' + Object.values(errors)[0] + '\n(DB 마이그레이션 v21 실행이 필요할 수 있습니다)')
+        return
+      }
+      alert(`완료: 부킹 ${editsList.length}건 업데이트${unmatched > 0 ? ` · 미매칭 C/I ${unmatched}건` : ''}`)
+      router.refresh()
+    } catch (err) {
+      alert('엑셀 처리 중 오류: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setCiUploading(false)
+    }
+  }
+
   const handleBulkEdit = () => {
     if (selectedRows.size === 0 || !bulkEditCol) return
     const editableIds = Array.from(selectedRows).filter(id => {
@@ -2648,6 +2754,16 @@ export default function BookingTable({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               엑셀
+            </button>
+            <input ref={ciFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleCiExcelUpload(f); e.target.value = '' }} />
+            <button onClick={() => ciFileRef.current?.click()} disabled={ciUploading}
+              title="엑셀의 C/I 번호와 매칭하여 CI_수량·CI_도착지·CI_모선명 열을 자동 업데이트합니다"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-sm rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
+              </svg>
+              {ciUploading ? '처리 중...' : 'C/I 업로드'}
             </button>
           </div>
         </div>

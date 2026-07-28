@@ -27,6 +27,7 @@ export default async function BookingsPage() {
     { data: prevPortsSetting },
     { data: allocRows },
     { data: closedRows },
+    { data: ciRows },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -50,6 +51,8 @@ export default async function BookingsPage() {
     supabase.from('bookings').select('id, alloc_qty'),
     // is_closed(마감완료)도 별도 조회 — 마이그레이션 미적용 시 무시
     supabase.from('bookings').select('id, is_closed'),
+    // CI 업로드 열도 별도 조회 — 마이그레이션 미적용 시 무시
+    supabase.from('bookings').select('id, ci_qty, ci_dest, ci_vessel'),
   ])
 
   // seq_no·alloc_qty 병합 (컬럼 없거나 오류 시 무시)
@@ -65,11 +68,18 @@ export default async function BookingsPage() {
   for (const r of (closedRows || []) as { id: string; is_closed: boolean | null }[]) {
     if (r.is_closed != null) closedMap.set(r.id, r.is_closed)
   }
+  const ciMap = new Map<string, { ci_qty: string | null; ci_dest: string | null; ci_vessel: string | null }>()
+  for (const r of (ciRows || []) as { id: string; ci_qty: string | null; ci_dest: string | null; ci_vessel: string | null }[]) {
+    ciMap.set(r.id, r)
+  }
   const bookingsWithSeq = ((bookings || []) as unknown as Booking[]).map(b => ({
     ...b,
     seq_no: seqMap.get(b.id) ?? b.seq_no,
     alloc_qty: allocMap.get(b.id) ?? null,
     is_closed: closedMap.get(b.id) ?? null,
+    ci_qty: ciMap.get(b.id)?.ci_qty ?? null,
+    ci_dest: ciMap.get(b.id)?.ci_dest ?? null,
+    ci_vessel: ciMap.get(b.id)?.ci_vessel ?? null,
   }))
 
   return (

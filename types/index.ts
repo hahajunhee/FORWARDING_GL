@@ -78,6 +78,9 @@ export interface Booking {
   con_pickup_qty: number
   alloc_qty: number | null
   is_closed?: boolean | null
+  ci_qty?: string | null    // CI_수량 (엑셀 업로드로 자동 입력)
+  ci_dest?: string | null   // CI_도착지
+  ci_vessel?: string | null // CI_모선명
   remarks: string
   booking_entries: BookingEntry[] | null
   extra_data: Record<string, string> | null
@@ -159,6 +162,9 @@ export const DEFAULT_COLUMN_ORDER = [
   'remarks',
   'week_no',
   'is_closed',
+  'ci_qty',
+  'ci_dest',
+  'ci_vessel',
 ]
 
 export const DEFAULT_PINNED_COLUMNS = ['forwarder_handler', 'discharge_port', 'final_destination']
@@ -186,6 +192,9 @@ export const COLUMN_LABELS: Record<string, string> = {
   con_pickup_qty:       '컨픽업수량',
   remarks:              '비고',
   is_closed:            '마감',
+  ci_qty:               'CI_수량',
+  ci_dest:              'CI_도착지',
+  ci_vessel:            'CI_모선명',
 }
 
 export const CARRIERS = [
