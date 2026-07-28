@@ -2217,14 +2217,19 @@ export default function BookingTable({
           backgroundColor: isFocusRow ? '#fef08a' : isSelected ? '#eff6ff' : (handlerColor || undefined),
           ...(editMode && hasEdits ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
         }}>
-        <td className="table-td w-9 sticky left-0 z-10"
+        <td className="table-td w-9 sticky left-0 z-10 cursor-pointer"
+          onClick={() => toggleRowSelect(booking.id)}
+          title="클릭하여 행 선택/해제"
           style={{
             backgroundColor: isFocusRow ? '#fef08a' : isSelected ? '#eff6ff' : (handlerColor || 'white'),
             borderRight: colBorder,
             borderTop: isGroupStart ? groupBorder : colBorder,
             borderBottom: isGroupEnd ? groupBorder : 'none',
           }}>
-          <input type="checkbox" checked={isSelected} onChange={() => toggleRowSelect(booking.id)} className="rounded border-gray-400" />
+          <input type="checkbox" checked={isSelected}
+            onClick={e => e.stopPropagation()}
+            onChange={() => toggleRowSelect(booking.id)}
+            className="rounded border-gray-400" />
         </td>
         {colsToRender.map(col => {
           const def = allColDefs[col]
