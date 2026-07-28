@@ -116,11 +116,11 @@ table tbody tr td[data-cell-sel-pinned="true"] {
   background-color: #c7d2fe !important;
 }
 
-/* 마감완료 행 — 완전히 완료된 느낌: 글자 흐리게 + 취소선 톤 */
+/* 마감완료 행 — 완전히 완료된 느낌: 어두운 배경 + 짙은 회색 글자 */
 tr[data-closed="true"] td,
 tr[data-closed="true"] td span,
 tr[data-closed="true"] td div {
-  color: #64748b !important;
+  color: #334155 !important;
 }
 tr[data-closed="true"] td .bg-blue-50,
 tr[data-closed="true"] td [class*="bg-"] {

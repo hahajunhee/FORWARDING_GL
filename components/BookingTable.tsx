@@ -1162,6 +1162,9 @@ export default function BookingTable({
   const [docFilter, _setDocFilter] = useState(false)
   const [mergeEnabled, _setMergeEnabled] = useState(true)
   const [activeCell, setActiveCell] = useState<{ id: string; col: string } | null>(null)
+  // 더블클릭·편집 중인 행 하이라이트 (노란색) — 편집 종료 시 해제
+  const [focusRowId, setFocusRowId] = useState<string | null>(null)
+  useEffect(() => { if (!editMode) setFocusRowId(null) }, [editMode])
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<{ field: string; value: string }[]>([])
   const [sortsSaved, setSortsSaved] = useState(false)
@@ -2148,7 +2151,9 @@ export default function BookingTable({
     // 마감완료 행은 어두운 회색 음영이 최우선 (도착지 색상보다 우선)
     // 편집 중(저장 전)에도 즉시 반영되도록 merged(편집 오버레이) 기준
     const effClosed = !!merged.is_closed
-    const handlerColor = effClosed ? '#cbd5e1' : (destinationColorMap[booking.final_destination || ''] || '')
+    // 더블클릭·편집 중인 행은 노란 하이라이트가 최우선 (현재 위치 확인용)
+    const isFocusRow = focusRowId === booking.id
+    const handlerColor = isFocusRow ? '#fef08a' : effClosed ? '#94a3b8' : (destinationColorMap[booking.final_destination || ''] || '')
     const isOwnBooking = canManageBooking(booking)
 
     const myDest = booking.final_destination || ''
@@ -2205,14 +2210,15 @@ export default function BookingTable({
     return (
       <tr key={booking.id}
         className="transition-colors"
+        data-bid={booking.id}
         data-closed={effClosed ? 'true' : undefined}
         style={{
-          backgroundColor: isSelected ? '#eff6ff' : (handlerColor || undefined),
+          backgroundColor: isFocusRow ? '#fef08a' : isSelected ? '#eff6ff' : (handlerColor || undefined),
           ...(editMode && hasEdits ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
         }}>
         <td className="table-td w-9 sticky left-0 z-10"
           style={{
-            backgroundColor: isSelected ? '#eff6ff' : (handlerColor || 'white'),
+            backgroundColor: isFocusRow ? '#fef08a' : isSelected ? '#eff6ff' : (handlerColor || 'white'),
             borderRight: colBorder,
             borderTop: isGroupStart ? groupBorder : colBorder,
             borderBottom: isGroupEnd ? groupBorder : 'none',
@@ -2259,7 +2265,7 @@ export default function BookingTable({
                 setCellSelEnd({ rowIdx, colIdx })
               }}
               onClick={canEditCell
-                ? () => setActiveCell({ id: booking.id, col })
+                ? () => { setActiveCell({ id: booking.id, col }); setFocusRowId(booking.id) }
                 : undefined
               }
               {...(isCellSel ? (isPinned ? { 'data-cell-sel-pinned': 'true' } : { 'data-cell-sel': 'true' }) : {})}
@@ -2790,7 +2796,20 @@ export default function BookingTable({
         className={`flex-1 overflow-auto min-h-0 bg-white rounded-xl border border-gray-300 shadow-sm${isDragSelecting ? ' is-drag-selecting' : ''}`}
         onMouseUp={() => { isMouseSelecting.current = false; setIsDragSelecting(false) }}
         onMouseLeave={() => { isMouseSelecting.current = false; setIsDragSelecting(false) }}
-        onDoubleClick={() => { if (!editMode) handleToggleEditMode() }}
+        onDoubleClick={e => {
+          if (editMode) return
+          // 더블클릭한 행을 기억 → 노란 하이라이트 + 편집모드 렌더 후 화면 가운데로
+          const tr = (e.target as HTMLElement).closest('tr[data-bid]')
+          const bid = tr?.getAttribute('data-bid') || null
+          setFocusRowId(bid)
+          handleToggleEditMode()
+          if (bid) {
+            setTimeout(() => {
+              tableWrapperRef.current?.querySelector(`tr[data-bid="${bid}"]`)
+                ?.scrollIntoView({ block: 'center', inline: 'nearest' })
+            }, 80)
+          }
+        }}
         onPaste={handleTablePaste}>
           <table className="w-full text-sm border-collapse">
             <thead className="sticky top-0 z-20">
