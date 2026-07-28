@@ -1081,6 +1081,7 @@ export default function BookingTable({
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkClosing, setBulkClosing] = useState(false)
   const [bulkEditOpen, setBulkEditOpen] = useState(false)
   const [bulkEditCol, setBulkEditCol] = useState('')
   const [bulkEditVal, setBulkEditVal] = useState('')
@@ -2011,6 +2012,26 @@ export default function BookingTable({
     }
   }
 
+  // 선택 행 마감완료 토글 — 선택이 전부 마감 상태면 해제
+  const handleBulkClose = async () => {
+    if (selectedRows.size === 0) return
+    const selected = bookings.filter(b => selectedRows.has(b.id))
+    const allClosed = selected.length > 0 && selected.every(b => b.is_closed)
+    setBulkClosing(true)
+    try {
+      const { errors } = await bulkSaveBookings(
+        Array.from(selectedRows).map(id => ({ id, data: { is_closed: !allClosed } })), [])
+      if (Object.keys(errors).length > 0) {
+        alert('마감완료 저장 실패: ' + Object.values(errors)[0] + '\n(DB 마이그레이션 v20 실행이 필요할 수 있습니다)')
+        return
+      }
+      setSelectedRows(new Set())
+      router.refresh()
+    } finally {
+      setBulkClosing(false)
+    }
+  }
+
   const handleBulkEdit = () => {
     if (selectedRows.size === 0 || !bulkEditCol) return
     const editableIds = Array.from(selectedRows).filter(id => {
@@ -2097,7 +2118,8 @@ export default function BookingTable({
     const merged: Partial<Booking> = { ...booking, ...edits }
     const hasEdits = Object.keys(edits).length > 0
     const err = rowErrors[booking.id]
-    const handlerColor = destinationColorMap[booking.final_destination || ''] || ''
+    // 마감완료 행은 회색 음영이 최우선 (도착지 색상보다 우선)
+    const handlerColor = booking.is_closed ? '#e2e8f0' : (destinationColorMap[booking.final_destination || ''] || '')
     const isOwnBooking = canManageBooking(booking)
 
     const myDest = booking.final_destination || ''
@@ -2505,6 +2527,19 @@ export default function BookingTable({
           <div className="ml-auto flex items-center gap-2">
             {selectedRows.size > 0 && (
               <>
+                {(() => {
+                  const sel = bookings.filter(b => selectedRows.has(b.id))
+                  const allClosed = sel.length > 0 && sel.every(b => b.is_closed)
+                  return (
+                    <button onClick={handleBulkClose} disabled={bulkClosing}
+                      title="선택한 행을 마감완료(회색 음영) 처리합니다. 이미 마감된 행만 선택하면 해제됩니다."
+                      className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium disabled:opacity-50 ${
+                        allClosed ? 'bg-slate-400 text-white hover:bg-slate-500' : 'bg-slate-600 text-white hover:bg-slate-700'
+                      }`}>
+                      {bulkClosing ? '처리 중...' : allClosed ? `마감해제 (${selectedRows.size})` : `마감완료 (${selectedRows.size})`}
+                    </button>
+                  )
+                })()}
                 <button onClick={() => setBulkEditOpen(!bulkEditOpen)}
                   className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
                   일괄편집 ({selectedRows.size})

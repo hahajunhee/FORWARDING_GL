@@ -26,6 +26,7 @@ export default async function BookingsPage() {
     { data: seqRows },
     { data: prevPortsSetting },
     { data: allocRows },
+    { data: closedRows },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -47,6 +48,8 @@ export default async function BookingsPage() {
     supabase.from('global_settings').select('value').eq('key', 'shanghai_prev_ports').single(),
     // alloc_qty(배분수량)도 별도 조회 — 마이그레이션 미적용 시 무시
     supabase.from('bookings').select('id, alloc_qty'),
+    // is_closed(마감완료)도 별도 조회 — 마이그레이션 미적용 시 무시
+    supabase.from('bookings').select('id, is_closed'),
   ])
 
   // seq_no·alloc_qty 병합 (컬럼 없거나 오류 시 무시)
@@ -58,10 +61,15 @@ export default async function BookingsPage() {
   for (const r of (allocRows || []) as { id: string; alloc_qty: number | null }[]) {
     if (r.alloc_qty != null) allocMap.set(r.id, r.alloc_qty)
   }
+  const closedMap = new Map<string, boolean>()
+  for (const r of (closedRows || []) as { id: string; is_closed: boolean | null }[]) {
+    if (r.is_closed != null) closedMap.set(r.id, r.is_closed)
+  }
   const bookingsWithSeq = ((bookings || []) as unknown as Booking[]).map(b => ({
     ...b,
     seq_no: seqMap.get(b.id) ?? b.seq_no,
     alloc_qty: allocMap.get(b.id) ?? null,
+    is_closed: closedMap.get(b.id) ?? null,
   }))
 
   return (

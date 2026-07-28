@@ -77,6 +77,7 @@ export interface Booking {
   qty_40_reefer: number
   con_pickup_qty: number
   alloc_qty: number | null
+  is_closed?: boolean | null
   remarks: string
   booking_entries: BookingEntry[] | null
   extra_data: Record<string, string> | null
