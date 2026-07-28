@@ -1285,7 +1285,12 @@ export default function BookingTable({
       case 'remarks': return booking.remarks || ''
       default: {
         const cd = customColumns.find(c => c.key === col)
-        if (cd) return (booking.extra_data as Record<string, string> | null)?.[col] || ''
+        if (cd) {
+          const raw = (booking.extra_data as Record<string, string> | null)?.[col] || ''
+          // C/I 열: 한 줄에 하나 (구버전 " / " 구분도 자동 변환) — 엑셀 붙여넣기 시 셀 하나당 하나
+          if (raw && isCiLabel(cd.label)) return ciLines(raw)
+          return raw
+        }
         return ''
       }
     }
@@ -1434,12 +1439,27 @@ export default function BookingTable({
         rows.push(row)
       }
       if (rows.length === 0) return
-      const tsv = rows.map(r => r.join('\t')).join('\n')
+      // 단일 열 복사: 셀 내 줄바꿈(C/I 여러 개 등)을 세로로 풀어서
+      // 엑셀에 붙여넣으면 셀 하나당 값 하나씩 들어가게 함
+      if (minC === maxC) {
+        const expanded: string[][] = []
+        for (const r of rows) {
+          const parts = (r[0] || '').split('\n')
+          if (parts.length > 1) parts.forEach(p => expanded.push([p]))
+          else expanded.push(r)
+        }
+        rows.length = 0
+        rows.push(...expanded)
+      }
+      // 다중 열: 줄바꿈 포함 셀은 따옴표로 감싸 TSV 구조 유지 (엑셀에선 셀 내 줄바꿈)
+      const tsvCell = (v: string) => (v.includes('\n') || v.includes('\t') || v.includes('"'))
+        ? `"${v.replace(/"/g, '""')}"` : v
+      const tsv = rows.map(r => r.map(tsvCell).join('\t')).join('\n')
       const htmlRows = rows.map((r, ri) => {
         const isHeader = copyWithHeadersRef.current && ri === 0
         const tag = isHeader ? 'th' : 'td'
         const style = isHeader ? 'padding:2px 6px;font-weight:bold;background:#f3f4f6;border:1px solid #d1d5db;' : 'padding:2px 6px;border:1px solid #e5e7eb;'
-        return '<tr>' + r.map(v => `<${tag} style="${style}">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</${tag}>`).join('') + '</tr>'
+        return '<tr>' + r.map(v => `<${tag} style="${style}">${v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>')}</${tag}>`).join('') + '</tr>'
       }).join('')
       const html = `<table style="font-family:'맑은 고딕',Malgun Gothic,sans-serif;font-size:10pt;border-collapse:collapse;">${htmlRows}</table>`
       // ClipboardItem 지원 브라우저: text + html 동시 복사
@@ -1494,7 +1514,19 @@ export default function BookingTable({
           }
           rows.push(row)
         }
-        const tsv = rows.map(r => r.join('\t')).join('\n')
+        // 단일 열이면 셀 내 줄바꿈(C/I 등)을 세로로 풀기 (Ctrl+C와 동일 규칙)
+        let outRows = rows
+        if (minC === maxC) {
+          outRows = []
+          for (const r of rows) {
+            const parts = (r[0] || '').split('\n')
+            if (parts.length > 1) parts.forEach(p => outRows.push([p]))
+            else outRows.push(r)
+          }
+        }
+        const xCell = (v: string) => (v.includes('\n') || v.includes('\t') || v.includes('"'))
+          ? `"${v.replace(/"/g, '""')}"` : v
+        const tsv = outRows.map(r => r.map(xCell).join('\t')).join('\n')
         navigator.clipboard.writeText(tsv).catch(() => {})
       }
 
