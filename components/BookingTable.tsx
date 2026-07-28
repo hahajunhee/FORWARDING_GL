@@ -569,9 +569,10 @@ function ContainerEdit({ row, onChange }: { row: Partial<Booking>; onChange: (c:
 
 const CTR_TYPES = ['20', '20DG', '20RF', '40', '40DG', '40RF'] as const
 
-function BookingEntriesEditor({ entries, onChange }: {
+function BookingEntriesEditor({ entries, onChange, showCi = false }: {
   entries: BookingEntry[]
   onChange: (entries: BookingEntry[]) => void
+  showCi?: boolean // 서류마감 지난 행: 부킹번호당 C/I 입력칸 표시
 }) {
   const handleChange = (i: number, field: keyof BookingEntry, value: string | number) => {
     onChange(entries.map((e, idx) => idx === i ? { ...e, [field]: value } : e))
@@ -601,6 +602,15 @@ function BookingEntriesEditor({ entries, onChange }: {
             onChange={e => handleChange(i, 'ctr_qty', parseInt(e.target.value) || 0)}
             onBlur={e => { if (!parseInt(e.target.value)) handleChange(i, 'ctr_qty', 1) }}
           />
+          {showCi && (
+            <input
+              className="w-24 border border-emerald-200 bg-emerald-50/40 rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:border-emerald-400"
+              value={entry.ci || ''}
+              onChange={e => handleChange(i, 'ci', e.target.value)}
+              placeholder="C/I"
+              title="C/I 번호 (부킹번호당 1개)"
+            />
+          )}
           {entries.length > 1 && (
             <button onClick={() => handleRemove(i)}
               className="text-red-400 hover:text-red-600 text-xs leading-none px-0.5">✕</button>
@@ -727,37 +737,31 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
     case 'booking_no': {
       const entries: BookingEntry[] = (row.booking_entries as BookingEntry[] | undefined) ||
         (row.booking_no ? [{ no: row.booking_no as string, ctr_type: '20', ctr_qty: 1 }] : [{ no: '', ctr_type: '20', ctr_qty: 1 }])
-      // 서류마감이 지난 행: CI 입력칸 추가 (커스텀 'CI' 열에 저장)
-      const ciCol = customColumns.find(cd => cd.label.trim().toUpperCase() === 'CI')
-        || customColumns.find(cd => cd.label.toUpperCase().includes('CI'))
+      // 서류마감이 지난 행: 부킹번호당 C/I 입력칸을 같은 행 우측에 표시
+      // 값은 booking_entries[].ci에 저장 + 커스텀 'C/I' 열(extra_data)에도 합쳐서 동기화
+      const ciCol = customColumns.find(cd => cd.label.toUpperCase().replace(/[^A-Z]/g, '') === 'CI')
       const cutoffPassed = (() => {
         const d = row.doc_cutoff_date
         if (!d) return false
         try { const p = parseISO(d); return isValid(p) && differenceInCalendarDays(p, new Date()) < 0 } catch { return false }
       })()
       return (
-        <div className="space-y-0.5">
-          <BookingEntriesEditor
-            entries={entries}
-            onChange={newEntries => onChange({
+        <BookingEntriesEditor
+          entries={entries}
+          showCi={cutoffPassed}
+          onChange={newEntries => {
+            const change: Partial<Booking> = {
               booking_entries: newEntries,
               booking_no: newEntries[0]?.no || '',
-            })}
-          />
-          {cutoffPassed && ciCol && (
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] font-bold text-emerald-600 flex-shrink-0">CI</span>
-              <input
-                value={(row.extra_data as Record<string, string> | null)?.[ciCol.key] || ''}
-                onChange={e => onChange({
-                  extra_data: { ...((row.extra_data as Record<string, string>) || {}), [ciCol.key]: e.target.value },
-                })}
-                placeholder="CI 입력 (마감 완료건)"
-                className="w-full border border-emerald-200 bg-emerald-50/40 rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-emerald-400"
-              />
-            </div>
-          )}
-        </div>
+            }
+            // C/I 열에는 항목별 C/I를 " / "로 합쳐서 저장 (열 표시·엑셀 반영용)
+            if (ciCol) {
+              const joined = newEntries.map(e => (e.ci || '').trim()).filter(Boolean).join(' / ')
+              change.extra_data = { ...((row.extra_data as Record<string, string>) || {}), [ciCol.key]: joined }
+            }
+            onChange(change)
+          }}
+        />
       )
     }
     case 'final_destination':
@@ -834,7 +838,10 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
         return (
           <div className="space-y-0.5">
             {booking.booking_entries.map((e, i) => (
-              <span key={i} className="block font-mono font-medium text-blue-700 text-xs">{e.no || <span className="text-gray-300">-</span>}</span>
+              <span key={i} className="block font-mono font-medium text-blue-700 text-xs whitespace-nowrap">
+                {e.no || <span className="text-gray-300">-</span>}
+                {e.ci && <span className="text-emerald-600 font-semibold ml-1.5" title="C/I">{e.ci}</span>}
+              </span>
             ))}
           </div>
         )
