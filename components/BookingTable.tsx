@@ -204,6 +204,15 @@ export function formatContainers(b: Partial<Booking>): string {
   return parts.join(' ') || '-'
 }
 
+// 커스텀 열 라벨이 C/I 계열(CI, C/I, C.I 등)인지 판별
+function isCiLabel(label: string): boolean {
+  return label.toUpperCase().replace(/[^A-Z]/g, '') === 'CI'
+}
+// C/I 문자열 정규화: 구버전 " / " 구분·줄바꿈 혼용 → 한 줄에 하나
+function ciLines(raw: string): string {
+  return raw.split(/\s*\/\s*|\n/).map(s => s.trim()).filter(Boolean).join('\n')
+}
+
 // ── 도착지 공유 그룹 (같은 부킹번호+모선명+VOYAGE = 한 부킹을 여러 도착지가 나눔) ──
 // 그룹총량 = 각 행 컨테이너 대수 합의 최대값 (기존유지 복사로 entries가 복제돼도 중복집계 없음)
 function entryUnitSum(b: Booking): number {
@@ -419,7 +428,10 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
               const q = calcTotalQty(b)
               return q > 0 ? q : ''
             }
-            return (b.extra_data as Record<string, string> | null)?.[ckey] || ''
+            const raw = (b.extra_data as Record<string, string> | null)?.[ckey] || ''
+            // C/I 열: 셀 내 줄바꿈으로 한 줄 = C/I 하나 (엑셀 복사 편의)
+            if (raw && isCiLabel(col.label)) return ciLines(raw)
+            return raw
           }
           return ''
         }
@@ -472,7 +484,8 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         const baseStyle: Record<string, unknown> = {
           font: { sz: 10, name: '맑은 고딕' },
           fill: rowFill,
-          alignment: { vertical: 'center', wrapText: col.key === 'remarks' || col.key === 'containers' },
+          // 커스텀 열(C/I 등)은 셀 내 줄바꿈 표시를 위해 wrapText
+          alignment: { vertical: 'center', wrapText: col.key === 'remarks' || col.key === 'containers' || col.key.startsWith('__custom_') },
           border,
         }
         // 정렬: 숫자·날짜는 가운데, 텍스트는 좌측
@@ -616,8 +629,18 @@ function BookingEntriesEditor({ entries, onChange, showCi = false }: {
                       className="w-20 border border-emerald-200 bg-emerald-50/40 rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:border-emerald-400"
                       value={c}
                       onChange={e => { const n = [...shown]; n[ciIdx] = e.target.value; setCis(n) }}
+                      onPaste={e => {
+                        // 엑셀 세로/가로 범위 붙여넣기 → 셀 하나당 C/I 하나로 자동 분배
+                        const text = e.clipboardData.getData('text/plain')
+                        const vals = text.replace(/\r/g, '').split(/[\n\t]+/).map(s => s.trim()).filter(Boolean)
+                        if (vals.length <= 1) return // 단일 값은 기본 붙여넣기
+                        e.preventDefault()
+                        const n = [...shown]
+                        n.splice(ciIdx, 1, ...vals) // 현재 칸부터 순서대로 채움
+                        setCis(n)
+                      }}
                       placeholder="C/I"
-                      title="C/I 번호"
+                      title="C/I 번호 — 엑셀 여러 셀 복사 후 붙여넣으면 자동으로 나눠 입력됩니다"
                     />
                     {shown.length > 1 && (
                       <button onClick={() => setCis(shown.filter((_, x) => x !== ciIdx))}
@@ -759,7 +782,7 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
         (row.booking_no ? [{ no: row.booking_no as string, ctr_type: '20', ctr_qty: 1 }] : [{ no: '', ctr_type: '20', ctr_qty: 1 }])
       // 서류마감이 지난 행: 부킹번호당 C/I 입력칸을 같은 행 우측에 표시
       // 값은 booking_entries[].ci에 저장 + 커스텀 'C/I' 열(extra_data)에도 합쳐서 동기화
-      const ciCol = customColumns.find(cd => cd.label.toUpperCase().replace(/[^A-Z]/g, '') === 'CI')
+      const ciCol = customColumns.find(cd => isCiLabel(cd.label))
       const cutoffPassed = (() => {
         const d = row.doc_cutoff_date
         if (!d) return false
@@ -774,11 +797,11 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
               booking_entries: newEntries,
               booking_no: newEntries[0]?.no || '',
             }
-            // C/I 열에는 전체 C/I를 " / "로 합쳐서 저장 (열 표시·엑셀 반영용)
+            // C/I 열에는 전체 C/I를 줄바꿈으로 합쳐 저장 (한 줄 = C/I 하나, 엑셀 복사 편의)
             if (ciCol) {
               const joined = newEntries
                 .flatMap(e => (e.cis ?? (e.ci ? [e.ci] : [])).map(c => (c || '').trim()))
-                .filter(Boolean).join(' / ')
+                .filter(Boolean).join('\n')
               change.extra_data = { ...((row.extra_data as Record<string, string>) || {}), [ciCol.key]: joined }
             }
             onChange(change)
@@ -859,15 +882,9 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
       if (booking.booking_entries && booking.booking_entries.length > 0) {
         return (
           <div className="space-y-0.5">
-            {booking.booking_entries.map((e, i) => {
-              const cis = (e.cis ?? (e.ci ? [e.ci] : [])).map(c => (c || '').trim()).filter(Boolean)
-              return (
-                <span key={i} className="block font-mono font-medium text-blue-700 text-xs whitespace-nowrap">
-                  {e.no || <span className="text-gray-300">-</span>}
-                  {cis.length > 0 && <span className="text-emerald-600 font-semibold ml-1.5" title="C/I">{cis.join(' / ')}</span>}
-                </span>
-              )
-            })}
+            {booking.booking_entries.map((e, i) => (
+              <span key={i} className="block font-mono font-medium text-blue-700 text-xs">{e.no || <span className="text-gray-300">-</span>}</span>
+            ))}
           </div>
         )
       }
@@ -967,8 +984,15 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
       }
       const cd = customColumns.find(c => c.key === colKey)
       if (cd) {
-        const val = (booking.extra_data as Record<string, string> | null)?.[colKey] || ''
-        return <span className="text-xs">{val || <span className="text-gray-300">-</span>}</span>
+        let val = (booking.extra_data as Record<string, string> | null)?.[colKey] || ''
+        // C/I 열: 한 줄에 하나씩 표시 (구버전 " / " 구분도 자동 변환)
+        const isCi = isCiLabel(cd.label)
+        if (val && isCi) val = ciLines(val)
+        return (
+          <span className={`text-xs ${isCi ? 'whitespace-pre-line font-mono text-emerald-700 font-medium' : ''}`}>
+            {val || <span className="text-gray-300">-</span>}
+          </span>
+        )
       }
       return null
     }
