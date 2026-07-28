@@ -158,6 +158,7 @@ export const DEFAULT_COLUMN_ORDER = [
   'con_pickup_qty',
   'remarks',
   'week_no',
+  'is_closed',
 ]
 
 export const DEFAULT_PINNED_COLUMNS = ['forwarder_handler', 'discharge_port', 'final_destination']
@@ -184,6 +185,7 @@ export const COLUMN_LABELS: Record<string, string> = {
   final_qty:            '최종수량',
   con_pickup_qty:       '컨픽업수량',
   remarks:              '비고',
+  is_closed:            '마감',
 }
 
 export const CARRIERS = [

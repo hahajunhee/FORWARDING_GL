@@ -92,6 +92,7 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   con_pickup_qty:       { label: '컨픽업수량',      minW: 90  },
   remarks:              { label: '비고',            minW: 160 },
   week_no:              { label: '주차',             minW: 150 },
+  is_closed:            { label: '마감',             minW: 60  },
 }
 
 // pinnedColumns 기준으로 sticky left 오프셋 계산 (colWidths 반영)
@@ -259,6 +260,7 @@ function getMonthLabel(key: string): string {
 function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]): string {
   switch (col) {
     case 'seq_no': return String(b.seq_no ?? 0).padStart(12, '0')
+    case 'is_closed': return b.is_closed ? '1' : '0'
     case 'booking_no': return (b.booking_entries && b.booking_entries.length > 0) ? b.booking_entries[0].no : (b.booking_no || '')
     case 'final_destination': return b.final_destination || ''
     case 'discharge_port': return b.discharge_port || ''
@@ -368,6 +370,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
       { key: 'containers',           label: '컨테이너',        type: 'text',   width: 22 },
       { key: 'con_pickup_qty',       label: '컨픽업수량',      type: 'number', width: 10 },
       { key: 'remarks',              label: '비고',            type: 'text',   width: 24 },
+      { key: 'is_closed',            label: '마감',            type: 'text',   width: 7 },
       ...customColumns.map<ColDef>(cd => ({
         key: `__custom_${cd.key}`,
         label: cd.label,
@@ -420,6 +423,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
           return q > 0 ? q : ''
         }
         case 'remarks':              return b.remarks || ''
+        case 'is_closed':            return b.is_closed ? '마감' : ''
         default: {
           if (col.key.startsWith('__custom_')) {
             const ckey = col.key.replace('__custom_', '')
@@ -777,6 +781,13 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
   switch (colKey) {
     case 'seq_no':
       return <span className="text-xs font-mono text-gray-400 italic px-1.5">{row.seq_no ?? '자동'}</span>
+    case 'is_closed':
+      return (
+        <label className="flex items-center gap-1 px-1.5 text-xs cursor-pointer">
+          <input type="checkbox" checked={!!row.is_closed} onChange={e => onChange({ is_closed: e.target.checked })} className="rounded" />
+          마감
+        </label>
+      )
     case 'booking_no': {
       const entries: BookingEntry[] = (row.booking_entries as BookingEntry[] | undefined) ||
         (row.booking_no ? [{ no: row.booking_no as string, ctr_type: '20', ctr_qty: 1 }] : [{ no: '', ctr_type: '20', ctr_qty: 1 }])
@@ -878,6 +889,10 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
   switch (colKey) {
     case 'seq_no':
       return <span className="text-xs font-mono font-semibold text-gray-500">{booking.seq_no ?? '-'}</span>
+    case 'is_closed':
+      return booking.is_closed
+        ? <span className="inline-block px-1.5 py-0.5 rounded text-[11px] font-bold text-white" style={{ backgroundColor: '#475569' }}>마감</span>
+        : <span className="text-gray-300 text-xs">-</span>
     case 'booking_no':
       if (booking.booking_entries && booking.booking_entries.length > 0) {
         return (
@@ -1284,6 +1299,7 @@ export default function BookingTable({
       case 'custom_mmgcysit': { const q = calcTotalQty(booking); return q > 0 ? (q % 1 === 0 ? String(q) : q.toFixed(1)) : '' }
       case 'con_pickup_qty': return booking.con_pickup_qty ? String(booking.con_pickup_qty) : ''
       case 'remarks': return booking.remarks || ''
+      case 'is_closed': return booking.is_closed ? '마감' : ''
       default: {
         const cd = customColumns.find(c => c.key === col)
         if (cd) {
@@ -2118,8 +2134,8 @@ export default function BookingTable({
     const merged: Partial<Booking> = { ...booking, ...edits }
     const hasEdits = Object.keys(edits).length > 0
     const err = rowErrors[booking.id]
-    // 마감완료 행은 회색 음영이 최우선 (도착지 색상보다 우선)
-    const handlerColor = booking.is_closed ? '#e2e8f0' : (destinationColorMap[booking.final_destination || ''] || '')
+    // 마감완료 행은 어두운 회색 음영이 최우선 (도착지 색상보다 우선)
+    const handlerColor = booking.is_closed ? '#cbd5e1' : (destinationColorMap[booking.final_destination || ''] || '')
     const isOwnBooking = canManageBooking(booking)
 
     const myDest = booking.final_destination || ''
@@ -2176,6 +2192,7 @@ export default function BookingTable({
     return (
       <tr key={booking.id}
         className="transition-colors"
+        data-closed={booking.is_closed ? 'true' : undefined}
         style={{
           backgroundColor: isSelected ? '#eff6ff' : (handlerColor || undefined),
           ...(editMode && hasEdits ? { boxShadow: 'inset 3px 0 0 #3b82f6' } : {}),
