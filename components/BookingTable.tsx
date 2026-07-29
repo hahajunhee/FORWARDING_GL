@@ -2101,40 +2101,72 @@ export default function BookingTable({
       const wb = XLSX.read(await file.arrayBuffer())
       const ws = wb.Sheets[wb.SheetNames[0]]
       if (!ws) { alert('엑셀에서 시트를 찾을 수 없습니다.'); return }
-      const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as unknown[][]
+      const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false }) as unknown[][]
       const norm = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^A-Z가-힣0-9]/g, '')
+      // 정확일치 우선 → 부분일치 보조 (부분일치만 쓰면 'Pick-up Destination' 같은 유사 열을 먼저 잡음)
+      const findCol = (row: unknown[], exacts: string[], fuzzies: string[]) => {
+        for (const e of exacts) { const i = row.findIndex(c => norm(c) === e); if (i >= 0) return i }
+        for (const f of fuzzies) { const i = row.findIndex(c => norm(c).includes(f)); if (i >= 0) return i }
+        return -1
+      }
       // 헤더 행 탐색 (상위 10행): C/I 열 필수, 수량·도착지·모선명 열 자동 인식
       let hRow = -1, ciIdx = -1, qtyIdx = -1, destIdx = -1, vesIdx = -1
       for (let r = 0; r < Math.min(grid.length, 10); r++) {
         const row = grid[r] || []
-        const ci = row.findIndex(c => { const n = norm(c); return n === 'CI' || n === 'CINO' || n === 'CI번호' })
+        const ci = findCol(row, ['CINVNO', 'CINVOICENO', 'CI', 'CINO', 'CI번호', 'CI넘버'], ['CINV'])
         if (ci === -1) continue
         hRow = r; ciIdx = ci
-        qtyIdx = row.findIndex(c => { const n = norm(c); return n.includes('수량') || n.includes('QTY') })
-        destIdx = row.findIndex(c => { const n = norm(c); return n.includes('도착지') || n.includes('DEST') })
-        vesIdx = row.findIndex(c => { const n = norm(c); return n.includes('모선') || n.includes('선명') || n.includes('VESSEL') })
+        qtyIdx  = findCol(row, ['QUANTITY', 'QTY', '수량', 'CI수량'], ['수량'])
+        destIdx = findCol(row, ['DELIVERYDESTINATION', '도착지', 'DEST', 'DESTINATION', 'CI도착지', 'FINALDESTINATION'], ['도착지'])
+        vesIdx  = findCol(row, ['VESSEL', 'VESSELNAME', '모선명', '선명', 'CI모선명'], ['모선', '선명'])
         break
       }
       if (hRow === -1) {
-        alert("엑셀 헤더에서 'C/I' 열을 찾지 못했습니다.\n첫 시트 상단에 C/I · 수량 · 도착지 · 모선명 열 제목이 필요합니다.")
+        alert("엑셀 헤더에서 'C/I' 열을 찾지 못했습니다.\n첫 시트 상단에 C/I(=C/INV NO.) 열이 필요합니다.\n수량=Quantity · 도착지=Delivery Destination · 모선명=Vessel 로 인식합니다.")
         return
       }
-      // C/I 번호 → 값 맵
-      const map = new Map<string, { qty: string; dest: string; vessel: string }>()
+      // C/I 번호 → 값 집계 (같은 C/I가 여러 행이면 수량은 합산, 도착지·모선명은 중복 제거)
+      type Agg = { nums: number[]; texts: string[]; dests: string[]; vessels: string[] }
+      const agg = new Map<string, Agg>()
       for (let r = hRow + 1; r < grid.length; r++) {
         const row = grid[r] || []
         const ci = String(row[ciIdx] ?? '').trim().toUpperCase()
         if (!ci) continue
-        map.set(ci, {
-          qty: qtyIdx >= 0 ? String(row[qtyIdx] ?? '').trim() : '',
-          dest: destIdx >= 0 ? String(row[destIdx] ?? '').trim() : '',
-          vessel: vesIdx >= 0 ? String(row[vesIdx] ?? '').trim() : '',
-        })
+        let a = agg.get(ci)
+        if (!a) { a = { nums: [], texts: [], dests: [], vessels: [] }; agg.set(ci, a) }
+        if (qtyIdx >= 0) {
+          const raw = String(row[qtyIdx] ?? '').trim()
+          if (raw) {
+            const n = Number(raw.replace(/,/g, ''))
+            if (Number.isFinite(n)) a.nums.push(n)
+            else if (!a.texts.includes(raw)) a.texts.push(raw)
+          }
+        }
+        if (destIdx >= 0) { const v = String(row[destIdx] ?? '').trim(); if (v && !a.dests.includes(v)) a.dests.push(v) }
+        if (vesIdx >= 0) { const v = String(row[vesIdx] ?? '').trim(); if (v && !a.vessels.includes(v)) a.vessels.push(v) }
       }
+      const map = new Map<string, { qty: string; dest: string; vessel: string }>()
+      agg.forEach((a, ci) => {
+        const sum = a.nums.reduce((s, n) => s + n, 0)
+        const numTxt = a.nums.length > 0 ? String(Math.round(sum * 1000) / 1000) : ''
+        map.set(ci, {
+          qty: [...a.texts, numTxt].filter(Boolean).join(' / '),
+          dest: a.dests.join(' / '),
+          vessel: a.vessels.join(' / '),
+        })
+      })
       if (map.size === 0) { alert('엑셀에서 C/I 데이터 행을 찾지 못했습니다.'); return }
-      // 부킹 매칭 (부킹의 C/I 번호 기준, 여러 개면 줄바꿈으로 순서대로)
+      // 부킹 매칭 (부킹의 C/I 번호 기준, 여러 개면 줄바꿈으로 순서대로) — 값이 바뀐 항목만 반영
       const editsList: { id: string; data: Record<string, unknown> }[] = []
+      const changeLines: string[] = []
       const usedCis = new Set<string>()
+      let newCount = 0, changedCount = 0, sameCount = 0
+      const colHas: Record<string, boolean> = { ci_qty: qtyIdx >= 0, ci_dest: destIdx >= 0, ci_vessel: vesIdx >= 0 }
+      const FIELDS: [string, string, (v: { qty: string; dest: string; vessel: string }) => string][] = [
+        ['ci_qty', '수량', v => v.qty],
+        ['ci_dest', '도착지', v => v.dest],
+        ['ci_vessel', '모선명', v => v.vessel],
+      ]
       for (const b of bookings) {
         const cis = (b.booking_entries || [])
           .flatMap(e => (e.cis ?? (e.ci ? [e.ci] : [])))
@@ -2142,24 +2174,51 @@ export default function BookingTable({
         const hit = cis.filter(c => map.has(c))
         if (hit.length === 0) continue
         hit.forEach(c => usedCis.add(c))
-        editsList.push({ id: b.id, data: {
-          ci_qty: hit.map(c => map.get(c)!.qty).filter(Boolean).join('\n'),
-          ci_dest: hit.map(c => map.get(c)!.dest).filter(Boolean).join('\n'),
-          ci_vessel: hit.map(c => map.get(c)!.vessel).filter(Boolean).join('\n'),
-        } })
-      }
-      if (editsList.length === 0) {
-        alert(`매칭된 부킹이 없습니다.\n엑셀 C/I ${map.size}건 중 부킹장의 C/I와 일치하는 번호가 없습니다.\n(먼저 부킹번호 편집에서 C/I를 입력해두어야 매칭됩니다)`)
-        return
+        const cur: Record<string, string> = {
+          ci_qty: (b.ci_qty || '').trim(),
+          ci_dest: (b.ci_dest || '').trim(),
+          ci_vessel: (b.ci_vessel || '').trim(),
+        }
+        const data: Record<string, unknown> = {}
+        const diffs: string[] = []
+        for (const [key, label, pick] of FIELDS) {
+          if (!colHas[key]) continue   // 엑셀에 해당 열이 없으면 기존 값 보존
+          const arr = hit.map(c => pick(map.get(c)!))
+          const nv = arr.some(Boolean) ? arr.join('\n') : ''
+          const cv = cur[key]
+          if (nv === cv || (!nv && !cv)) continue
+          data[key] = nv
+          const flat = (s: string) => s.replace(/\n/g, ',') || '(공란)'
+          diffs.push(cv ? `${label} ${flat(cv)} → ${flat(nv)}` : `${label} ${flat(nv)}`)
+        }
+        if (Object.keys(data).length === 0) { sameCount++; continue }
+        if (cur.ci_qty || cur.ci_dest || cur.ci_vessel) {
+          changedCount++
+          changeLines.push(`• ${b.booking_no || '(부킹번호 없음)'} [${hit.join(', ')}] ${diffs.join(' · ')}`)
+        } else newCount++
+        editsList.push({ id: b.id, data })
       }
       const unmatched = map.size - usedCis.size
-      if (!confirm(`부킹 ${editsList.length}건에 CI_수량·CI_도착지·CI_모선명을 업데이트합니다.${unmatched > 0 ? `\n(엑셀 C/I ${unmatched}건은 부킹장에서 찾지 못해 제외)` : ''}\n계속할까요?`)) return
+      if (editsList.length === 0) {
+        alert(usedCis.size > 0
+          ? `변경된 값이 없습니다. (이미 최신 상태)\n매칭 C/I ${usedCis.size}건 · 동일 부킹 ${sameCount}건${unmatched > 0 ? ` · 미매칭 C/I ${unmatched}건` : ''}`
+          : `매칭된 부킹이 없습니다.\n엑셀 C/I ${map.size}건 중 부킹장의 C/I와 일치하는 번호가 없습니다.\n(먼저 부킹번호 편집에서 C/I를 입력해두어야 매칭됩니다)`)
+        return
+      }
+      const head = `엑셀 C/I ${map.size}건 중 ${usedCis.size}건 매칭\n`
+        + `신규 입력 ${newCount}건 · 값 변경 ${changedCount}건 · 동일(건너뜀) ${sameCount}건`
+        + (unmatched > 0 ? ` · 미매칭 ${unmatched}건` : '')
+      const detail = changeLines.length > 0
+        ? `\n\n[기존 값이 바뀌는 행]\n${changeLines.slice(0, 15).join('\n')}`
+          + (changeLines.length > 15 ? `\n…외 ${changeLines.length - 15}건` : '')
+        : ''
+      if (!confirm(`${head}${detail}\n\n적용할까요?`)) return
       const { errors } = await bulkSaveBookings(editsList, [])
       if (Object.keys(errors).length > 0) {
         alert('저장 실패: ' + Object.values(errors)[0] + '\n(DB 마이그레이션 v21 실행이 필요할 수 있습니다)')
         return
       }
-      alert(`완료: 부킹 ${editsList.length}건 업데이트${unmatched > 0 ? ` · 미매칭 C/I ${unmatched}건` : ''}`)
+      alert(`완료: 신규 ${newCount}건 · 변경 ${changedCount}건 업데이트${sameCount > 0 ? ` · 동일 ${sameCount}건 건너뜀` : ''}${unmatched > 0 ? ` · 미매칭 C/I ${unmatched}건` : ''}`)
       router.refresh()
     } catch (err) {
       alert('엑셀 처리 중 오류: ' + (err instanceof Error ? err.message : String(err)))
