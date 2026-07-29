@@ -94,6 +94,7 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   week_no:              { label: '주차',             minW: 150 },
   is_closed:            { label: '마감',             minW: 60  },
   ci_qty:               { label: 'CI_수량',          minW: 80  },
+  ci_qty_total:         { label: 'CI_수량(총합)',    minW: 110 },
   ci_dest:              { label: 'CI_도착지',        minW: 100 },
   ci_vessel:            { label: 'CI_모선명',        minW: 120 },
 }
@@ -194,6 +195,35 @@ export function calcTotalQty(b: Partial<Booking>): number {
   return qty20 * 0.5 + qty40
 }
 
+// CI_수량(총합): CI_수량 셀에 들어있는 숫자(줄바꿈·'/' 구분)를 모두 합산
+export function calcCiQtyTotal(b: Partial<Booking>): number | null {
+  const raw = (b.ci_qty || '').trim()
+  if (!raw) return null
+  let sum = 0
+  let found = false
+  for (const part of raw.split(/[\n/]+/)) {
+    const m = part.replace(/,/g, '').trim().match(/-?\d+(\.\d+)?/)
+    if (!m) continue
+    sum += Number(m[0])
+    found = true
+  }
+  return found ? Math.round(sum * 1000) / 1000 : null
+}
+
+export function fmtQtyNum(n: number): string {
+  return n % 1 === 0 ? String(n) : String(Number(n.toFixed(2)))
+}
+
+// CI_수량(총합) ≠ 최종수량 여부 (둘 다 값이 있을 때만 비교)
+export function isCiQtyMismatch(b: Booking, edits?: Partial<Booking>): boolean {
+  const merged = edits ? { ...b, ...edits } : b
+  const total = calcCiQtyTotal(merged)
+  if (total === null) return false
+  const fin = calcFinalQty(merged as Booking)
+  if (fin === null) return false
+  return Math.abs(total - fin) > 0.0001
+}
+
 export function formatContainers(b: Partial<Booking>): string {
   if (b.booking_entries && b.booking_entries.length > 0) {
     return b.booking_entries.map(e => `${e.ctr_type}×${e.ctr_qty}`).join(' / ')
@@ -265,6 +295,7 @@ function getSortValue(b: Booking, col: string, customColumns: ColumnDefinition[]
     case 'seq_no': return String(b.seq_no ?? 0).padStart(12, '0')
     case 'is_closed': return b.is_closed ? '1' : '0'
     case 'ci_qty': return b.ci_qty || ''
+    case 'ci_qty_total': { const t = calcCiQtyTotal(b); return t === null ? '' : String(t).padStart(12, '0') }
     case 'ci_dest': return b.ci_dest || ''
     case 'ci_vessel': return b.ci_vessel || ''
     case 'booking_no': return (b.booking_entries && b.booking_entries.length > 0) ? b.booking_entries[0].no : (b.booking_no || '')
@@ -378,6 +409,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
       { key: 'remarks',              label: '비고',            type: 'text',   width: 24 },
       { key: 'is_closed',            label: '마감',            type: 'text',   width: 7 },
       { key: 'ci_qty',               label: 'CI_수량',         type: 'text',   width: 10 },
+      { key: 'ci_qty_total',         label: 'CI_수량(총합)',   type: 'number', width: 12 },
       { key: 'ci_dest',              label: 'CI_도착지',       type: 'text',   width: 12 },
       { key: 'ci_vessel',            label: 'CI_모선명',       type: 'text',   width: 14 },
       ...customColumns.map<ColDef>(cd => ({
@@ -434,6 +466,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         case 'remarks':              return b.remarks || ''
         case 'is_closed':            return b.is_closed ? '마감' : ''
         case 'ci_qty':               return b.ci_qty || ''
+        case 'ci_qty_total': { const t = calcCiQtyTotal(b); return t === null ? '' : t }
         case 'ci_dest':              return b.ci_dest || ''
         case 'ci_vessel':            return b.ci_vessel || ''
         default: {
@@ -518,6 +551,11 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         if ('_blankSailing' in rows[r] && col.key === 'vessel_name') {
           baseStyle.font = { sz: 10, name: '맑은 고딕', bold: true, color: { rgb: 'D97706' } }
           baseStyle.fill = { patternType: 'solid', fgColor: { rgb: 'FEF3C7' } }
+        }
+        // CI_수량(총합) ≠ 최종수량 → 노란 음영 + 빨간 글자 (웹 화면과 동일)
+        if (col.key === 'ci_qty_total' && !('_blankSailing' in rows[r]) && isCiQtyMismatch(rows[r] as Booking)) {
+          baseStyle.font = { sz: 10, name: '맑은 고딕', bold: true, color: { rgb: 'DC2626' } }
+          baseStyle.fill = { patternType: 'solid', fgColor: { rgb: 'FEF08A' } }
         }
         ws[addr].s = baseStyle
       }
@@ -879,6 +917,10 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
       return <span className="text-xs text-gray-400 italic px-1.5">부킹번호 열에서 편집</span>
     case 'final_qty':
       return <span className="text-xs text-gray-400 italic px-1.5">자동 계산</span>
+    case 'ci_qty_total': {
+      const t = calcCiQtyTotal(row)
+      return <span className="text-xs text-gray-500 italic px-1.5">{t === null ? '-' : fmtQtyNum(t)} (자동)</span>
+    }
     case 'con_pickup_qty':
       return <input autoFocus={autoFocus} type="number" min={0} className={cls} value={row.con_pickup_qty ?? 0} onChange={e => onChange({ con_pickup_qty: Math.max(0, Number(e.target.value) || 0) })} placeholder="컨픽업수량" />
     case 'remarks':
@@ -925,6 +967,12 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
     case 'ci_vessel': {
       const v = (booking[colKey] as string | null) || ''
       return <span className="text-xs whitespace-pre-line">{v || <span className="text-gray-300">-</span>}</span>
+    }
+    case 'ci_qty_total': {
+      // C/I 수량 합계 — 최종수량과 다르면 노란 음영·빨간 글자 (td[data-ci-mismatch])
+      const t = calcCiQtyTotal(booking)
+      if (t === null) return <span className="text-gray-300 text-xs">-</span>
+      return <span className="text-xs font-semibold">{fmtQtyNum(t)}</span>
     }
     case 'booking_no':
       if (booking.booking_entries && booking.booking_entries.length > 0) {
@@ -1339,6 +1387,7 @@ export default function BookingTable({
       case 'remarks': return booking.remarks || ''
       case 'is_closed': return booking.is_closed ? '마감' : ''
       case 'ci_qty': return booking.ci_qty || ''
+      case 'ci_qty_total': { const t = calcCiQtyTotal(booking); return t === null ? '' : fmtQtyNum(t) }
       case 'ci_dest': return booking.ci_dest || ''
       case 'ci_vessel': return booking.ci_vessel || ''
       default: {
@@ -1598,7 +1647,7 @@ export default function BookingTable({
         const changes: Partial<Booking> = {}
         for (let c = minC; c <= maxC; c++) {
           const col = cols[c]
-          if (!col || col === 'forwarder_handler' || col === 'week_no' || col === 'handler_region' || col === 'handler_customers' || col === 'final_qty') continue
+          if (!col || col === 'forwarder_handler' || col === 'week_no' || col === 'handler_region' || col === 'handler_customers' || col === 'final_qty' || col === 'ci_qty_total') continue
           const change = textToCellChangeRef.current(col, '')
           if (change) {
             if (change.extra_data) {
@@ -2318,7 +2367,9 @@ export default function BookingTable({
     const effClosed = !!merged.is_closed
     // 더블클릭·편집 중인 행은 노란 하이라이트가 최우선 (현재 위치 확인용)
     const isFocusRow = focusRowId === booking.id
-    const handlerColor = isFocusRow ? '#fef08a' : effClosed ? '#94a3b8' : (destinationColorMap[booking.final_destination || ''] || '')
+    const handlerColor = isFocusRow ? '#fef08a' : effClosed ? '#D9D9D9' : (destinationColorMap[booking.final_destination || ''] || '')
+    // CI_수량(총합) ≠ 최종수량 → 해당 셀만 노란 음영·빨간 글자
+    const ciMismatch = isCiQtyMismatch(booking, edits)
     const isOwnBooking = canManageBooking(booking)
 
     const myDest = booking.final_destination || ''
@@ -2440,6 +2491,7 @@ export default function BookingTable({
                 : undefined
               }
               {...(isCellSel ? (isPinned ? { 'data-cell-sel-pinned': 'true' } : { 'data-cell-sel': 'true' }) : {})}
+              {...(col === 'ci_qty_total' && ciMismatch ? { 'data-ci-mismatch': 'true', title: 'CI_수량(총합)이 최종수량과 다릅니다' } : {})}
               className={`table-td text-xs
                 ${isPinned ? 'sticky z-10' : ''}
                 ${dragOver === col && dragSrc !== col ? 'bg-blue-50' : ''}
@@ -2923,7 +2975,7 @@ export default function BookingTable({
           <select value={bulkEditCol} onChange={e => setBulkEditCol(e.target.value)}
             className="border border-blue-200 rounded-lg px-2 py-1 text-xs bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none">
             <option value="">변경할 열 선택</option>
-            {colsToRender.filter(c => c !== 'week_no' && c !== 'handler_region' && c !== 'handler_customers' && c !== 'final_qty').map(c => (
+            {colsToRender.filter(c => c !== 'week_no' && c !== 'handler_region' && c !== 'handler_customers' && c !== 'final_qty' && c !== 'ci_qty_total').map(c => (
               <option key={c} value={c}>{allColDefs[c]?.label || c}</option>
             ))}
           </select>

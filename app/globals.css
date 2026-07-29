@@ -136,6 +136,18 @@ tr[data-closed="true"] td .bg-yellow-50 {
   background-color: transparent !important;
 }
 
+/* CI_수량(총합) ≠ 최종수량 — 노란 음영 + 빨간 글자 (행 음영·호버·마감보다 우선) */
+table tbody tr td[data-ci-mismatch="true"],
+table tbody tr:hover td[data-ci-mismatch="true"] {
+  background-color: #fef08a !important;
+}
+table tbody tr td[data-ci-mismatch="true"],
+table tbody tr td[data-ci-mismatch="true"] span,
+table tbody tr td[data-ci-mismatch="true"] div {
+  color: #dc2626 !important;
+  font-weight: 700 !important;
+}
+
 /* 숫자 입력 화살표(spinner) 제거 */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {

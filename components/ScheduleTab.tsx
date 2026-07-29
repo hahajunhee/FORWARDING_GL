@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useTransition, useEffect } from 'react'
 import { format, parseISO, isValid } from 'date-fns'
 import type { Booking, ColumnDefinition } from '@/types'
 import { COLUMN_LABELS, DEFAULT_COLUMN_ORDER } from '@/types'
-import { formatContainers, calcTotalQty } from './BookingTable'
+import { formatContainers, calcTotalQty, calcCiQtyTotal, fmtQtyNum } from './BookingTable'
 import { saveGlobalScheduleCols } from '@/app/settings/actions'
 
 // 기본 열 (containers 포함, 가상 열 포함, final_qty 제외)
@@ -48,6 +48,11 @@ function getCellValue(booking: Booking, col: string, customCols: ColumnDefinitio
     case 'eta': return fmtDate(booking.eta)
     case 'containers': return formatContainers(booking)
     case 'remarks': return booking.remarks || ''
+    case 'is_closed': return booking.is_closed ? '마감' : ''
+    case 'ci_qty': return booking.ci_qty || ''
+    case 'ci_qty_total': { const t = calcCiQtyTotal(booking); return t === null ? '' : fmtQtyNum(t) }
+    case 'ci_dest': return booking.ci_dest || ''
+    case 'ci_vessel': return booking.ci_vessel || ''
     case 'custom_mmgcysit': {
       const qty = calcTotalQty(booking)
       return qty > 0 ? (qty % 1 === 0 ? String(qty) : qty.toFixed(1)) : ''

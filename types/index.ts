@@ -163,6 +163,7 @@ export const DEFAULT_COLUMN_ORDER = [
   'week_no',
   'is_closed',
   'ci_qty',
+  'ci_qty_total',
   'ci_dest',
   'ci_vessel',
 ]
@@ -193,6 +194,7 @@ export const COLUMN_LABELS: Record<string, string> = {
   remarks:              '비고',
   is_closed:            '마감',
   ci_qty:               'CI_수량',
+  ci_qty_total:         'CI_수량(총합)',
   ci_dest:              'CI_도착지',
   ci_vessel:            'CI_모선명',
 }
