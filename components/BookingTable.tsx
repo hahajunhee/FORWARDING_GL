@@ -56,7 +56,7 @@ export function getWeekLabel(weekNum: number): string {
   return `${weekNum}주차 (${format(start, 'M/d')}~${format(end, 'M/d')})`
 }
 
-function getWeekStartDate(weekNum: number): string {
+export function getWeekStartDate(weekNum: number): string {
   return format(addDays(WEEK1_START, (weekNum - 1) * 7), 'yyyy-MM-dd')
 }
 

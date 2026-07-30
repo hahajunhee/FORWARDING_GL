@@ -4,6 +4,7 @@ import { useState, useMemo, useRef, useEffect, useTransition } from 'react'
 import { format, parseISO, isValid } from 'date-fns'
 import type { Booking, Profile, ScheduleDestGroup } from '@/types'
 import { saveScheduleDestGroups } from '@/app/bookings/actions'
+import { getWeekNum, getWeekStartDate } from './BookingTable'
 
 // ── 열 정의 (고객사 송부 양식과 동일 순서) ──────────────────────────
 const COLS = [
@@ -15,7 +16,23 @@ const COLS = [
   { key: 'sliding',   label: '슬라이딩 지연일수', w: 110 },
   { key: 'doc',       label: '서류마감',          w: 110 },
   { key: 'eta',       label: 'P.O.D ETA',         w: 110 },
+  { key: 'qty',       label: '부킹수량',          w: 90  },
 ] as const
+
+// 부킹수량 (20ft=0.5, 40ft=1) — rfOff면 RF(리퍼) 컨테이너 제외
+function qtyOf(b: Booking, rfOff: boolean): number {
+  if (b.booking_entries && b.booking_entries.length > 0) {
+    return b.booking_entries.reduce((sum, e) => {
+      if (rfOff && /rf|reefer|리퍼/i.test(e.ctr_type || '')) return sum
+      return sum + (e.ctr_qty || 0) * ((e.ctr_type || '').startsWith('20') ? 0.5 : 1)
+    }, 0)
+  }
+  const q20 = (b.qty_20_normal || 0) + (b.qty_20_dg || 0) + (rfOff ? 0 : (b.qty_20_reefer || 0))
+  const q40 = (b.qty_40_normal || 0) + (b.qty_40_dg || 0) + (rfOff ? 0 : (b.qty_40_reefer || 0))
+  return q20 * 0.5 + q40
+}
+
+const fmtQty = (n: number) => n === 0 ? '' : (n % 1 === 0 ? String(n) : n.toFixed(1))
 
 const HEADER_BG = '#FFC000'
 const HEADER_FG = '#C00000'
@@ -32,6 +49,9 @@ interface SchedRow {
   etdIso: string
   handlerId: string
   month: string
+  src: Booking | null
+  weekNum: number | null
+  blank?: boolean
 }
 
 interface DisplayRow extends SchedRow {
@@ -58,6 +78,8 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
   const [filterSearch, setFilterSearch] = useState('')
   const [mapOpen, setMapOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [rfOff, setRfOff] = useState(false)        // RF해제: 리퍼 컨테이너 제외하고 합산
+  const [showBlank, setShowBlank] = useState(false) // 비어있는 주차를 BLANK SAILING으로 표시
 
   // 범위 선택
   const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null)
@@ -84,11 +106,14 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
         sliding: '',
         doc: fmtKo(b.doc_cutoff_date),
         eta: fmtKo(b.eta),
+        qty: '',
       },
       srcDest: b.final_destination || '',
       etdIso: b.proforma_etd || '',
       handlerId: b.forwarder_handler_id || '',
       month: b.proforma_etd ? b.proforma_etd.slice(0, 7) : '',
+      src: b,
+      weekNum: getWeekNum(b.proforma_etd),
     }
   }), [bookings])
 
@@ -118,6 +143,22 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
     return (dest: string) => map.get((dest || '').trim().toUpperCase()) || dest || '(미지정)'
   }, [groups])
 
+  // BLANK SAILING 판정 기준 주차 — 선택한 월에 걸친 주차 (전체면 조회된 주차 전부)
+  const targetWeeks = useMemo(() => {
+    const set = new Set<number>()
+    if (month) {
+      const [y, m] = month.split('-').map(Number)
+      const lastDay = new Date(y, m, 0).getDate()
+      for (let d = 1; d <= lastDay; d++) {
+        const w = getWeekNum(`${month}-${String(d).padStart(2, '0')}`)
+        if (w !== null) set.add(w)
+      }
+    } else {
+      for (const r of filteredRows) if (r.weekNum !== null) set.add(r.weekNum)
+    }
+    return [...set].sort((a, b) => a - b)
+  }, [month, filteredRows])
+
   // 그룹핑 + 중복 제거 + 정렬 → 표시 행
   const displayRows = useMemo<DisplayRow[]>(() => {
     const byLabel = new Map<string, SchedRow[]>()
@@ -140,14 +181,32 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
 
     const out: DisplayRow[] = []
     for (const label of labels) {
-      // 같은 그룹 안에서 선사+선명이 같으면 한 행으로 (도착지만 다른 부킹 중복 제거)
-      const seen = new Map<string, SchedRow>()
+      // 같은 그룹 안에서 선사+선명이 같으면 한 행으로 (도착지만 다른 부킹 → 수량은 합산)
+      const seen = new Map<string, { row: SchedRow; srcs: Booking[] }>()
       for (const r of byLabel.get(label)!) {
         const key = `${r.cells.carrier}|${r.cells.vessel}`
-        const prev = seen.get(key)
-        if (!prev || (r.etdIso && (!prev.etdIso || r.etdIso < prev.etdIso))) seen.set(key, r)
+        const cur = seen.get(key)
+        if (!cur) { seen.set(key, { row: r, srcs: r.src ? [r.src] : [] }); continue }
+        if (r.src) cur.srcs.push(r.src)
+        if (r.etdIso && (!cur.row.etdIso || r.etdIso < cur.row.etdIso)) cur.row = r
       }
-      const rows = [...seen.values()].sort((a, b) => {
+      const rows: SchedRow[] = [...seen.values()].map(({ row, srcs }) => ({
+        ...row,
+        cells: { ...row.cells, qty: fmtQty(srcs.reduce((s, b) => s + qtyOf(b, rfOff), 0)) },
+      }))
+      // 비어있는 주차 → BLANK SAILING 행 추가
+      if (showBlank) {
+        const present = new Set(rows.map(r => r.weekNum).filter(w => w !== null) as number[])
+        for (const w of targetWeeks) {
+          if (present.has(w)) continue
+          rows.push({
+            cells: { dest: '', carrier: '', vessel: `BLANK SAILING (${w}주차)`, etd_first: '', etd_curr: '', sliding: '', doc: '', eta: '', qty: '' },
+            srcDest: '', etdIso: getWeekStartDate(w), handlerId: '', month: '',
+            src: null, weekNum: w, blank: true,
+          })
+        }
+      }
+      rows.sort((a, b) => {
         if (a.etdIso !== b.etdIso) return (a.etdIso || '9999').localeCompare(b.etdIso || '9999')
         return a.cells.vessel.localeCompare(b.cells.vessel)
       })
@@ -160,7 +219,7 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
       }))
     }
     return out
-  }, [filteredRows, labelOf, groups, destinationSortOrder])
+  }, [filteredRows, labelOf, groups, destinationSortOrder, rfOff, showBlank, targetWeeks])
 
   // ── 셀 값 (병합된 도착지는 그룹 첫 행에만) ───────────────────────
   const cellText = (rowIdx: number, colKey: string, forCopy = false, selTop = -1): string => {
@@ -274,7 +333,10 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
     import('xlsx-js-style').then((mod) => {
       const XLSX = (mod as unknown as { default: typeof import('xlsx-js-style') }).default ?? mod
       const header = COLS.map(c => c.label)
-      const aoa: string[][] = [header, ...displayRows.map((_, r) => COLS.map(c => cellText(r, c.key)))]
+      const aoa: (string | number)[][] = [header, ...displayRows.map((_, r) => COLS.map(c => {
+        const v = cellText(r, c.key)
+        return c.key === 'qty' && v !== '' && !isNaN(Number(v)) ? Number(v) : v
+      }))]
       const ws = XLSX.utils.aoa_to_sheet(aoa)
 
       const thin = { style: 'thin', color: { rgb: '000000' } } as const
@@ -294,8 +356,12 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
         for (let c = 0; c < COLS.length; c++) {
           const addr = XLSX.utils.encode_cell({ r: i + 1, c })
           if (!ws[addr]) ws[addr] = { t: 's', v: '' }
+          const isBlankVessel = row.blank && COLS[c].key === 'vessel'
           ws[addr].s = {
-            font: { sz: 10, name: '맑은 고딕' },
+            font: isBlankVessel
+              ? { sz: 10, name: '맑은 고딕', bold: true, color: { rgb: 'B45309' } }
+              : { sz: 10, name: '맑은 고딕' },
+            ...(row.blank ? { fill: { patternType: 'solid', fgColor: { rgb: 'FEF3C7' } } } : {}),
             alignment: { horizontal: 'center', vertical: 'center', wrapText: c === 0 },
             border: {
               top: row.groupStart ? medium : thin,
@@ -368,6 +434,18 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
             ))}
           </select>
           <span className="text-[11px] text-slate-400">PROFORMA ETD 기준</span>
+          <button onClick={() => setRfOff(v => !v)}
+            className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
+              rfOff ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
+            title="RF(리퍼) 컨테이너를 부킹수량 합계에서 제외">
+            RF해제 {rfOff ? 'ON' : 'OFF'}
+          </button>
+          <label className="flex items-center gap-1.5 text-xs text-slate-600 px-2 py-1.5 rounded-lg border border-slate-200 bg-white cursor-pointer select-none"
+            title="선택한 월 중 배가 없는 주차를 BLANK SAILING으로 표시">
+            <input type="checkbox" checked={showBlank} onChange={e => setShowBlank(e.target.checked)} />
+            BLANK SAILING 표시
+          </label>
           <div className="flex-1" />
           {filterCount > 0 && (
             <button onClick={() => setColFilters({})}
@@ -489,10 +567,11 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
                         textAlign: 'center',
                         verticalAlign: 'middle',
                         whiteSpace: isDest ? 'pre-line' : 'nowrap',
-                        background: sel ? '#cfe2ff' : '#ffffff',
+                        background: sel ? '#cfe2ff' : row.blank ? '#FEF3C7' : '#ffffff',
                         cursor: 'cell',
                         userSelect: 'none',
-                        fontWeight: isDest ? 600 : 400,
+                        fontWeight: isDest || (row.blank && c.key === 'vessel') ? 600 : 400,
+                        color: row.blank && c.key === 'vessel' ? '#B45309' : undefined,
                       }}>
                       {cellText(r, c.key)}
                     </td>
