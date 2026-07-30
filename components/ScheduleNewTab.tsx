@@ -22,7 +22,7 @@ const COLS = [
 ] as const
 
 // 부킹수량 (20ft=0.5, 40ft=1) — rfOff면 RF(리퍼) 컨테이너 제외
-function qtyOf(b: Booking, rfOff: boolean): number {
+export function qtyOf(b: Booking, rfOff: boolean): number {
   if (b.booking_entries && b.booking_entries.length > 0) {
     return b.booking_entries.reduce((sum, e) => {
       if (rfOff && /rf|reefer|리퍼/i.test(e.ctr_type || '')) return sum
@@ -34,13 +34,13 @@ function qtyOf(b: Booking, rfOff: boolean): number {
   return q20 * 0.5 + q40
 }
 
-const fmtQty = (n: number) => n === 0 ? '' : (n % 1 === 0 ? String(n) : n.toFixed(1))
+export const fmtQty = (n: number) => n === 0 ? '' : (n % 1 === 0 ? String(n) : n.toFixed(1))
 
 const HEADER_BG = '#FFC000'
 const HEADER_FG = '#C00000'
 const LINE = '#000000'
 
-function fmtKo(d: string | null | undefined): string {
+export function fmtKo(d: string | null | undefined): string {
   if (!d) return ''
   try { const p = parseISO(d); return isValid(p) ? format(p, 'MM월 dd일') : '' } catch { return '' }
 }
@@ -642,7 +642,7 @@ export default function ScheduleNewTab({
 
 // ── BLANK SAILING 주차 설정 모달 (월별 저장) ────────────────────────
 
-function BlankWeekModal({ month, defaultWeeks, selected, isCustom, allWeeks, onClose, onSaved }: {
+export function BlankWeekModal({ month, defaultWeeks, selected, isCustom, allWeeks, onClose, onSaved }: {
   month: string
   defaultWeeks: number[]
   selected: number[]
@@ -720,7 +720,7 @@ function BlankWeekModal({ month, defaultWeeks, selected, isCustom, allWeeks, onC
 
 // ── 도착지 매핑 모달 ────────────────────────────────────────────────
 
-function DestMappingModal({ groups, allDests, onClose, onSaved }: {
+export function DestMappingModal({ groups, allDests, onClose, onSaved }: {
   groups: ScheduleDestGroup[]
   allDests: string[]
   onClose: () => void

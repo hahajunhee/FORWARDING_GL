@@ -81,6 +81,7 @@ export interface Booking {
   ci_qty?: string | null    // CI_수량 (엑셀 업로드로 자동 입력)
   ci_dest?: string | null   // CI_도착지
   ci_vessel?: string | null // CI_모선명
+  etd_history?: Record<string, string> | null // 기준일별 ETD 스냅샷 (확보선복취합)
   remarks: string
   booking_entries: BookingEntry[] | null
   extra_data: Record<string, string> | null

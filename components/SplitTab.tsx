@@ -7,6 +7,7 @@ import type { Booking, Profile, CustomList, BookingEntry } from '@/types'
 import { DEFAULT_DESTINATIONS } from '@/types'
 import { bulkSaveBookings } from '@/app/bookings/actions'
 import { addCustomListItem } from '@/app/settings/actions'
+import { calcTotalQty, calcCiQtyTotal, fmtQtyNum } from './BookingTable'
 
 // ── 분할 계산 ───────────────────────────────────────────────────────
 
@@ -23,7 +24,17 @@ interface Candidate {
   booking: Booking
   parts: Part[]
   kind: 'split' | 'dest'   // split: 여러 행으로 분할 / dest: 도착지만 변경
+  rowQty: number           // 부킹수량 (컨테이너 기준)
+  ciTotal: number          // CI_수량(총합)
+  mismatch: boolean        // 둘이 다르면 쪼개기 불가
 }
+
+const round3 = (n: number) => Math.round(n * 1000) / 1000
+const numOf = (v: string) => {
+  const m = (v || '').replace(/,/g, '').match(/-?\d+(\.\d+)?/)
+  return m ? Number(m[0]) : NaN
+}
+const multOf = (ctrType: string) => (ctrType || '').startsWith('20') ? 0.5 : 1
 
 const cisOf = (e: BookingEntry): string[] =>
   (e.cis ?? (e.ci ? [e.ci] : [])).map(c => (c || '').trim()).filter(Boolean)
@@ -59,7 +70,15 @@ function buildParts(b: Booking): Part[] {
     g.ciIdx.push(i)
   })
 
-  // 엔트리(부킹번호)를 도착지별로 배분 — C/I가 여러 도착지에 걸치면 수량을 비율로 분할
+  // C/I별 수량 (CI_수량 각 줄)
+  const qtyOfCi = new Map<string, number>()
+  flat.forEach((f, i) => {
+    const n = numOf(qLines[i] || '')
+    if (!isNaN(n)) qtyOfCi.set(f.ci.toUpperCase(), (qtyOfCi.get(f.ci.toUpperCase()) || 0) + n)
+  })
+
+  // 엔트리(부킹번호)를 도착지별로 배분
+  // 컨테이너 수량은 해당 C/I의 CI_수량 합과 일치하도록 재계산 (부킹수량 = CI_수량(총합))
   return order.map(dest => {
     const g = byDest.get(dest)!
     const mine = new Set(g.cis.map(c => c.toUpperCase()))
@@ -74,12 +93,16 @@ function buildParts(b: Booking): Part[] {
       }
       const sub = all.filter(c => mine.has(c.toUpperCase()))
       if (sub.length === 0) return
-      if (sub.length === all.length) {
+      const ciSum = sub.reduce((s, c) => s + (qtyOfCi.get(c.toUpperCase()) ?? NaN), 0)
+      if (!isNaN(ciSum) && ciSum > 0) {
+        // CI_수량 기준으로 컨테이너 수량 산출 (20ft=0.5, 40ft=1)
+        partEntries.push({ ...e, ctr_qty: round3(ciSum / multOf(e.ctr_type)), cis: sub })
+        if (sub.length !== all.length) prorated = true
+      } else if (sub.length === all.length) {
         partEntries.push({ ...e, cis: sub })
       } else {
         prorated = true
-        const q = Math.round(((e.ctr_qty || 0) * sub.length) / all.length)
-        partEntries.push({ ...e, ctr_qty: q, cis: sub })
+        partEntries.push({ ...e, ctr_qty: round3(((e.ctr_qty || 0) * sub.length) / all.length), cis: sub })
       }
     })
     return { dest, cis: g.cis, qtyLines: g.qtyLines, vesselLines: g.vesselLines, entries: partEntries, prorated }
@@ -96,6 +119,66 @@ const containersOf = (entries: BookingEntry[]) =>
 
 const bookingNosOf = (entries: BookingEntry[]) =>
   entries.map(e => e.no).filter(Boolean).join(' / ') || '-'
+
+// ── 부킹수량 수정 (컨테이너 수량 직접 편집 → DB 저장) ────────────────
+
+function QtyEditor({ booking, ciTotal, onSaved }: {
+  booking: Booking
+  ciTotal: number
+  onSaved: () => void
+}) {
+  const [entries, setEntries] = useState<BookingEntry[]>(
+    (booking.booking_entries || []).map(e => ({ ...e })))
+  const [isPending, startTransition] = useTransition()
+  const [err, setErr] = useState<string | null>(null)
+
+  const total = entries.reduce((s, e) => s + (e.ctr_qty || 0) * multOf(e.ctr_type), 0)
+  const ok = Math.abs(total - ciTotal) <= 0.0001
+
+  const setQty = (i: number, v: string) =>
+    setEntries(p => p.map((e, ei) => ei === i ? { ...e, ctr_qty: Number(v) || 0 } : e))
+
+  const save = () => {
+    setErr(null)
+    startTransition(async () => {
+      const { errors } = await bulkSaveBookings([{ id: booking.id, data: { booking_entries: entries } }], [])
+      if (Object.keys(errors).length > 0) { setErr(Object.values(errors)[0]); return }
+      onSaved()
+    })
+  }
+
+  return (
+    <div className="px-3 py-2.5 bg-red-50/60 border-b border-red-100 space-y-2">
+      <p className="text-[11px] text-red-700 font-medium">
+        부킹수량과 CI_수량(총합)이 달라 쪼갤 수 없습니다. 아래에서 컨테이너 수량을 수정하고 저장하세요. (20ft = 0.5, 40ft = 1)
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        {entries.map((e, i) => (
+          <div key={i} className="flex flex-col">
+            <label className="text-[10px] text-slate-500 mb-0.5">
+              {e.no || '(부킹번호 없음)'} · {e.ctr_type}
+              {cisOf(e).length > 0 && <span className="text-emerald-600"> · {cisOf(e).join(', ')}</span>}
+            </label>
+            <input type="number" step="0.5" min={0} value={e.ctr_qty ?? 0}
+              onChange={ev => setQty(i, ev.target.value)}
+              className="w-24 text-sm border border-slate-300 rounded-lg px-2 py-1" />
+          </div>
+        ))}
+        {entries.length === 0 && <span className="text-xs text-slate-500">컨테이너 정보가 없습니다. 부킹장에서 부킹번호·컨테이너를 먼저 입력하세요.</span>}
+        <div className="flex items-center gap-2 ml-auto">
+          <span className={`text-xs font-bold ${ok ? 'text-emerald-600' : 'text-red-600'}`}>
+            부킹수량 {fmtQtyNum(total)} / CI_수량(총합) {fmtQtyNum(ciTotal)}
+          </span>
+          <button onClick={save} disabled={isPending || entries.length === 0}
+            className="text-xs px-3 py-1.5 rounded-lg bg-rose-600 text-white font-medium hover:bg-rose-700 disabled:opacity-40">
+            {isPending ? '저장 중...' : '수량 저장'}
+          </button>
+        </div>
+      </div>
+      {err && <p className="text-xs text-red-600">{err}</p>}
+    </div>
+  )
+}
 
 // ── 컴포넌트 ────────────────────────────────────────────────────────
 
@@ -131,11 +214,14 @@ export default function SplitTab({ bookings, profiles, customLists }: Props) {
       const parts = buildParts(b)
       if (parts.length === 0) continue
       const base = (b.final_destination || '').trim()
+      const rowQty = calcTotalQty(b)
+      const ciTotal = calcCiQtyTotal(b) ?? 0
+      const mismatch = Math.abs(rowQty - ciTotal) > 0.0001
       if (parts.length === 1) {
         if (parts[0].dest === base) continue      // 변화 없음
-        out.push({ booking: b, parts, kind: 'dest' })
+        out.push({ booking: b, parts, kind: 'dest', rowQty, ciTotal, mismatch })
       } else {
-        out.push({ booking: b, parts, kind: 'split' })
+        out.push({ booking: b, parts, kind: 'split', rowQty, ciTotal, mismatch })
       }
     }
     return out
@@ -165,7 +251,9 @@ export default function SplitTab({ bookings, profiles, customLists }: Props) {
     () => profiles.filter(p => candidates.some(c => c.booking.forwarder_handler_id === p.id)),
     [profiles, candidates])
 
-  const selected = useMemo(() => visible.filter(c => checked.has(c.booking.id)), [visible, checked])
+  // 수량 불일치 행은 선택 자체가 불가 (쪼개기 전에 반드시 확인)
+  const selected = useMemo(
+    () => visible.filter(c => checked.has(c.booking.id) && !c.mismatch), [visible, checked])
 
   const newDests = useMemo(() => {
     const s = new Set<string>()
@@ -184,9 +272,10 @@ export default function SplitTab({ bookings, profiles, customLists }: Props) {
     setResult(null)
   }
 
+  const selectable = useMemo(() => visible.filter(c => !c.mismatch), [visible])
   const toggleAll = () => {
-    if (visible.every(c => checked.has(c.booking.id))) setChecked(new Set())
-    else setChecked(new Set(visible.map(c => c.booking.id)))
+    if (selectable.length > 0 && selectable.every(c => checked.has(c.booking.id))) setChecked(new Set())
+    else setChecked(new Set(selectable.map(c => c.booking.id)))
   }
 
   // ── 실행 ──────────────────────────────────────────────────────────
@@ -304,9 +393,14 @@ export default function SplitTab({ bookings, profiles, customLists }: Props) {
                 분할되는 건만
               </label>
               <button onClick={toggleAll} className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200">
-                {visible.length > 0 && visible.every(c => checked.has(c.booking.id)) ? '전체 해제' : '전체 선택'}
+                {selectable.length > 0 && selectable.every(c => checked.has(c.booking.id)) ? '전체 해제' : '전체 선택'}
               </button>
-              <span className="text-[11px] text-slate-400">표시 {visible.length}건</span>
+              <span className="text-[11px] text-slate-400">
+                표시 {visible.length}건
+                {visible.length - selectable.length > 0 && (
+                  <span className="text-red-500 font-medium"> · 수량 확인 필요 {visible.length - selectable.length}건</span>
+                )}
+              </span>
             </div>
           </>
         )}
@@ -334,10 +428,15 @@ export default function SplitTab({ bookings, profiles, customLists }: Props) {
             const b = c.booking
             const on = checked.has(b.id)
             return (
-              <div key={b.id} className={`bg-white border rounded-xl overflow-hidden transition-colors ${on ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200'}`}>
-                <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 border-b border-slate-100 cursor-pointer"
-                  onClick={() => setChecked(prev => { const n = new Set(prev); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n })}>
-                  <input type="checkbox" checked={on} onChange={() => {}} className="pointer-events-none" />
+              <div key={b.id} className={`bg-white border rounded-xl overflow-hidden transition-colors ${
+                c.mismatch ? 'border-red-300' : on ? 'border-indigo-400 ring-1 ring-indigo-200' : 'border-slate-200'
+              }`}>
+                <div className={`flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-100 ${c.mismatch ? 'bg-red-50 cursor-not-allowed' : 'bg-slate-50 cursor-pointer'}`}
+                  onClick={() => {
+                    if (c.mismatch) return
+                    setChecked(prev => { const n = new Set(prev); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n })
+                  }}>
+                  <input type="checkbox" checked={on && !c.mismatch} disabled={c.mismatch} onChange={() => {}} className="pointer-events-none" />
                   <span className="text-xs font-bold text-slate-700">#{b.seq_no ?? '-'}</span>
                   <span className="text-xs text-slate-500">{b.carrier} · {b.vessel_name} / {b.voyage}</span>
                   <span className="text-xs text-slate-400">ETD {fmtDate(b.proforma_etd)} · 마감 {fmtDate(b.doc_cutoff_date)}</span>
@@ -347,7 +446,16 @@ export default function SplitTab({ bookings, profiles, customLists }: Props) {
                   {c.parts.some(p => p.prorated) && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-800 font-bold" title="한 부킹번호의 C/I가 여러 도착지에 걸쳐 있어 컨테이너 수량을 비율로 나눴습니다">수량 비율분할</span>
                   )}
+                  <span className={`text-[11px] font-medium ${c.mismatch ? 'text-red-600' : 'text-slate-500'}`}>
+                    CI_수량(총합) {fmtQtyNum(c.ciTotal)} / 부킹수량 {fmtQtyNum(c.rowQty)}
+                  </span>
+                  {c.mismatch && (
+                    <span className="text-[11px] font-bold text-red-600">⚠ 값이 일치하지 않습니다. 확인 바랍니다.</span>
+                  )}
                 </div>
+                {c.mismatch && (
+                  <QtyEditor booking={b} ciTotal={c.ciTotal} onSaved={() => router.refresh()} />
+                )}
                 <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-100">
                   {/* 전 */}
                   <div className="p-3">

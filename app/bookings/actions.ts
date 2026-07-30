@@ -204,6 +204,67 @@ export async function saveScheduleDestGroups(
   return { error: null }
 }
 
+// ── 확보선복취합: 기준일별 ETD 스냅샷 저장 ──────────────────────────
+
+export async function saveEtdSnapshot(
+  dateKey: string,
+  ids: string[],
+): Promise<{ error: string | null; count: number }> {
+  if (!dateKey || ids.length === 0) return { error: null, count: 0 }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.', count: 0 }
+
+  const { data: rows, error: selErr } = await supabase
+    .from('bookings')
+    .select('id, updated_etd, proforma_etd, etd_history')
+    .in('id', ids)
+  if (selErr) {
+    if (/etd_history/i.test(selErr.message)) return { error: 'DB 마이그레이션(v22) 실행이 필요합니다.', count: 0 }
+    return { error: selErr.message, count: 0 }
+  }
+
+  let count = 0
+  let firstErr: string | null = null
+  await Promise.all((rows || []).map(async r => {
+    const etd = (r.updated_etd || r.proforma_etd || '') as string
+    const hist = { ...((r.etd_history as Record<string, string> | null) || {}), [dateKey]: etd }
+    const { error } = await supabase.from('bookings').update({ etd_history: hist }).eq('id', r.id)
+    if (error) { if (!firstErr) firstErr = error.message } else count++
+  }))
+
+  if (firstErr) return { error: firstErr, count }
+  revalidatePath('/bookings')
+  return { error: null, count }
+}
+
+export async function deleteEtdSnapshot(
+  dateKey: string,
+  ids: string[],
+): Promise<{ error: string | null }> {
+  if (!dateKey || ids.length === 0) return { error: null }
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { data: rows, error: selErr } = await supabase
+    .from('bookings').select('id, etd_history').in('id', ids)
+  if (selErr) return { error: selErr.message }
+
+  let firstErr: string | null = null
+  await Promise.all((rows || []).map(async r => {
+    const hist = { ...((r.etd_history as Record<string, string> | null) || {}) }
+    if (!(dateKey in hist)) return
+    delete hist[dateKey]
+    const { error } = await supabase.from('bookings').update({ etd_history: hist }).eq('id', r.id)
+    if (error && !firstErr) firstErr = error.message
+  }))
+
+  if (firstErr) return { error: firstErr }
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 // ── 주요 스케줄(new) BLANK SAILING 주차 설정 저장 (월별, 전체 공유) ──
 
 export async function saveScheduleBlankWeeks(

@@ -7,12 +7,13 @@ import DocCutoffTab from './DocCutoffTab'
 import ReeferCutoffTab from './ReeferCutoffTab'
 import ScheduleNewTab from './ScheduleNewTab'
 import SplitTab from './SplitTab'
+import SecuredSpaceTab from './SecuredSpaceTab'
 import ShanghaiMgmtTab from './ShanghaiMgmtTab'
 import { signOut } from '@/app/bookings/actions'
 import type { Booking, Profile, CustomList, ColumnDefinition, ShanghaiMgmtRow, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE } from '@/types'
 
-type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'shanghai'
+type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'shanghai'
 
 interface Props {
   bookings: Booking[]
@@ -86,6 +87,17 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'secured',
+    label: '확보선복취합',
+    sub: 'MQC·확보·실선적',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
       </svg>
     ),
   },
@@ -290,6 +302,21 @@ export default function BookingPageLayout({
                 <p className="text-sm text-gray-500">담당자·출항월로 걸러 고객사 송부 양식 그대로 조회하고 Excel로 다운로드합니다.</p>
               </div>
               <ScheduleNewTab
+                bookings={bookings}
+                profiles={profiles}
+                initialGroups={scheduleDestGroups}
+                initialBlankWeeks={scheduleBlankWeeks}
+                destinationSortOrder={destinationSortOrder}
+              />
+            </div>
+          )}
+          {activeTab === 'secured' && (
+            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">확보선복취합</h2>
+                <p className="text-sm text-gray-500">도착지별로 MQC·확보선복·실선적물량을 취합하고, 기준일별 ETD 변동 이력을 함께 봅니다.</p>
+              </div>
+              <SecuredSpaceTab
                 bookings={bookings}
                 profiles={profiles}
                 initialGroups={scheduleDestGroups}

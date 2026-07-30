@@ -29,6 +29,7 @@ export default async function BookingsPage() {
     { data: closedRows },
     { data: ciRows },
     { data: blankWeekSetting },
+    { data: etdHistRows },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -55,6 +56,8 @@ export default async function BookingsPage() {
     // CI 업로드 열도 별도 조회 — 마이그레이션 미적용 시 무시
     supabase.from('bookings').select('id, ci_qty, ci_dest, ci_vessel'),
     supabase.from('global_settings').select('value').eq('key', 'schedule_blank_weeks').single(),
+    // ETD 스냅샷도 별도 조회 — 마이그레이션 미적용 시 무시
+    supabase.from('bookings').select('id, etd_history'),
   ])
 
   // seq_no·alloc_qty 병합 (컬럼 없거나 오류 시 무시)
@@ -74,6 +77,10 @@ export default async function BookingsPage() {
   for (const r of (ciRows || []) as { id: string; ci_qty: string | null; ci_dest: string | null; ci_vessel: string | null }[]) {
     ciMap.set(r.id, r)
   }
+  const etdHistMap = new Map<string, Record<string, string>>()
+  for (const r of (etdHistRows || []) as { id: string; etd_history: Record<string, string> | null }[]) {
+    if (r.etd_history) etdHistMap.set(r.id, r.etd_history)
+  }
   const bookingsWithSeq = ((bookings || []) as unknown as Booking[]).map(b => ({
     ...b,
     seq_no: seqMap.get(b.id) ?? b.seq_no,
@@ -82,6 +89,7 @@ export default async function BookingsPage() {
     ci_qty: ciMap.get(b.id)?.ci_qty ?? null,
     ci_dest: ciMap.get(b.id)?.ci_dest ?? null,
     ci_vessel: ciMap.get(b.id)?.ci_vessel ?? null,
+    etd_history: etdHistMap.get(b.id) ?? null,
   }))
 
   return (
