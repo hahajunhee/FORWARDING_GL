@@ -186,6 +186,24 @@ export async function saveShanghaiPrevPorts(ports: string[]): Promise<{ error: s
   return { error: null }
 }
 
+// ── 주요 스케줄(new) 최종도착지 매핑 저장 (전체 공유) ───────────────
+
+export async function saveScheduleDestGroups(
+  groups: { label: string; members: string[] }[]
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'schedule_dest_groups', value: groups })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 // ── 일괄 삭제 ──────────────────────────────────────────────────────
 
 export async function bulkDeleteBookings(ids: string[]): Promise<{ error: string | null }> {
@@ -198,23 +216,6 @@ export async function bulkDeleteBookings(ids: string[]): Promise<{ error: string
   const { error } = await supabase.from('bookings').delete().in('id', ids).eq('forwarder_handler_id', user.id)
   if (error) return { error: error.message }
   revalidatePath('/bookings')
-  return { error: null }
-}
-
-// ── 부킹장(모선) 개인 설정 저장 (열 순서·표시 열 — 계정 단위) ────────
-
-export async function saveVesselPrefs(
-  prefs: { order: string[]; visible: string[] | null }
-): Promise<{ error: string | null }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: '로그인이 필요합니다.' }
-
-  const { error } = await supabase.from('profiles').update({ vessel_prefs: prefs }).eq('id', user.id)
-  if (error) {
-    if (/vessel_prefs|column/i.test(error.message)) return { error: '열 설정 저장에는 DB 마이그레이션(v19) 실행이 필요합니다.' }
-    return { error: error.message }
-  }
   return { error: null }
 }
 

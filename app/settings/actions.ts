@@ -164,27 +164,6 @@ export async function saveCustomListOrder(orderedIds: string[]): Promise<{ error
   return { error: null }
 }
 
-// ── 스케줄 열 구성 전체 저장 (비밀번호 필요) ─────────────────────────
-
-export async function saveGlobalScheduleCols(
-  cols: string[],
-  password: string
-): Promise<{ error: string | null }> {
-  if (password !== '4478') return { error: '비밀번호가 올바르지 않습니다.' }
-
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: '로그인이 필요합니다.' }
-
-  const { error } = await supabase
-    .from('global_settings')
-    .upsert({ key: 'schedule_cols', value: cols, updated_at: new Date().toISOString() })
-
-  if (error) return { error: error.message }
-  revalidatePath('/bookings')
-  return { error: null }
-}
-
 // ── 내 프로필 정보 저장 (이름, 지역, 고객사) ────────────────────────
 
 export async function saveMyProfile(

@@ -3,16 +3,15 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import BookingTable from './BookingTable'
-import VesselTable from './VesselTable'
 import DocCutoffTab from './DocCutoffTab'
 import ReeferCutoffTab from './ReeferCutoffTab'
-import ScheduleTab from './ScheduleTab'
+import ScheduleNewTab from './ScheduleNewTab'
 import ShanghaiMgmtTab from './ShanghaiMgmtTab'
 import { signOut } from '@/app/bookings/actions'
-import type { Booking, Profile, CustomList, ColumnDefinition, ShanghaiMgmtRow } from '@/types'
+import type { Booking, Profile, CustomList, ColumnDefinition, ShanghaiMgmtRow, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE } from '@/types'
 
-type Tab = 'bookings' | 'vessel' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule' | 'shanghai'
+type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'shanghai'
 
 interface Props {
   bookings: Booking[]
@@ -22,7 +21,6 @@ interface Props {
   currentProfile: Profile | null
   customLists: CustomList[]
   customColumns: ColumnDefinition[]
-  initialScheduleCols: string[] | null
   regionList: string[]
   customerList: string[]
   baseColDescriptions: Record<string, string>
@@ -30,6 +28,7 @@ interface Props {
   destinationSortOrder?: string[]
   shanghaiRows?: ShanghaiMgmtRow[]
   shanghaiPrevPorts?: string[]
+  scheduleDestGroups?: ScheduleDestGroup[]
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -41,17 +40,6 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'vessel',
-    label: '부킹장(모선)',
-    sub: '모선 단위 병합',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M4 7h16M4 12h16M4 17h7" />
       </svg>
     ),
   },
@@ -78,9 +66,9 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
     ),
   },
   {
-    key: 'schedule',
-    label: '주요 스케줄',
-    sub: '고객사 송부',
+    key: 'schedule_new',
+    label: '주요 스케줄(new)',
+    sub: '고객사 송부 양식',
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -104,8 +92,9 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
 const MASTER_EMAIL = 'hahajunhee@glovis.net'
 
 export default function BookingPageLayout({
-  bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns, initialScheduleCols,
+  bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns,
   regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [], shanghaiRows = [], shanghaiPrevPorts = [],
+  scheduleDestGroups = [],
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -248,15 +237,6 @@ export default function BookingPageLayout({
               />
             </div>
           )}
-          {activeTab === 'vessel' && (
-            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">부킹장(모선)</h2>
-                <p className="text-sm text-gray-500">선사·모선명·VOYAGE가 같은 부킹을 한 행으로 병합해 관리합니다. 편집·저장 시 부킹장에 그대로 반영됩니다.</p>
-              </div>
-              <VesselTable bookings={bookings} profiles={profiles} customLists={customLists} currentUserId={currentUserId} regionList={regionList} customerList={customerList} initialPrefs={currentProfile?.vessel_prefs || null} />
-            </div>
-          )}
           {activeTab === 'doc_cutoff' && (
             <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
               <div>
@@ -281,13 +261,18 @@ export default function BookingPageLayout({
               <ReeferCutoffTab bookings={bookings} />
             </div>
           )}
-          {activeTab === 'schedule' && (
+          {activeTab === 'schedule_new' && (
             <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
               <div>
-                <h2 className="text-lg font-bold text-gray-900">주요 스케줄</h2>
-                <p className="text-sm text-gray-500">고객사 송부용 스케줄을 열 구성 후 Excel로 다운로드합니다.</p>
+                <h2 className="text-lg font-bold text-gray-900">주요 스케줄(new)</h2>
+                <p className="text-sm text-gray-500">담당자·출항월로 걸러 고객사 송부 양식 그대로 조회하고 Excel로 다운로드합니다.</p>
               </div>
-              <ScheduleTab bookings={bookings} customColumns={customColumns} initialScheduleCols={initialScheduleCols} destinationSortOrder={destinationSortOrder} />
+              <ScheduleNewTab
+                bookings={bookings}
+                profiles={profiles}
+                initialGroups={scheduleDestGroups}
+                destinationSortOrder={destinationSortOrder}
+              />
             </div>
           )}
           {activeTab === 'shanghai' && (

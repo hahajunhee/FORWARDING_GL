@@ -128,6 +128,13 @@ export interface ShanghaiMgmtRow {
   updated_at: string
 }
 
+// 주요 스케줄(new) — 최종도착지 매핑 그룹
+// 서로 다른 최종도착지를 하나의 표시명으로 묶어 병합 표시한다.
+export interface ScheduleDestGroup {
+  label: string      // 표시명 (줄바꿈 가능: "ONTARIO(LA)\nJEFFERSON(LA)")
+  members: string[]  // 포함되는 최종도착지 원본값
+}
+
 export interface CustomList {
   id: string
   user_id: string
