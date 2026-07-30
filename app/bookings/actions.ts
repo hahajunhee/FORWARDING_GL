@@ -204,6 +204,24 @@ export async function saveScheduleDestGroups(
   return { error: null }
 }
 
+// ── 주요 스케줄(new) BLANK SAILING 주차 설정 저장 (월별, 전체 공유) ──
+
+export async function saveScheduleBlankWeeks(
+  weeksByMonth: Record<string, number[]>
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'schedule_blank_weeks', value: weeksByMonth })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 // ── 일괄 삭제 ──────────────────────────────────────────────────────
 
 export async function bulkDeleteBookings(ids: string[]): Promise<{ error: string | null }> {

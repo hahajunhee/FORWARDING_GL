@@ -29,6 +29,7 @@ interface Props {
   shanghaiRows?: ShanghaiMgmtRow[]
   shanghaiPrevPorts?: string[]
   scheduleDestGroups?: ScheduleDestGroup[]
+  scheduleBlankWeeks?: Record<string, number[]>
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -94,7 +95,7 @@ const MASTER_EMAIL = 'hahajunhee@glovis.net'
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns,
   regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [], shanghaiRows = [], shanghaiPrevPorts = [],
-  scheduleDestGroups = [],
+  scheduleDestGroups = [], scheduleBlankWeeks = {},
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -271,6 +272,7 @@ export default function BookingPageLayout({
                 bookings={bookings}
                 profiles={profiles}
                 initialGroups={scheduleDestGroups}
+                initialBlankWeeks={scheduleBlankWeeks}
                 destinationSortOrder={destinationSortOrder}
               />
             </div>

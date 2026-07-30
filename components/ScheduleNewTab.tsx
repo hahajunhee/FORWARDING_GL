@@ -4,7 +4,8 @@ import { useState, useMemo, useRef, useEffect, useTransition } from 'react'
 import { format, parseISO, isValid } from 'date-fns'
 import type { Booking, Profile, ScheduleDestGroup } from '@/types'
 import { saveScheduleDestGroups } from '@/app/bookings/actions'
-import { getWeekNum, getWeekStartDate } from './BookingTable'
+import { getWeekNum, getWeekStartDate, getWeekLabel } from './BookingTable'
+import { saveScheduleBlankWeeks } from '@/app/bookings/actions'
 
 // ── 열 정의 (고객사 송부 양식과 동일 순서) ──────────────────────────
 const COLS = [
@@ -17,6 +18,7 @@ const COLS = [
   { key: 'doc',       label: '서류마감',          w: 110 },
   { key: 'eta',       label: 'P.O.D ETA',         w: 110 },
   { key: 'qty',       label: '부킹수량',          w: 90  },
+  { key: 'week',      label: '주차',              w: 80  },
 ] as const
 
 // 부킹수량 (20ft=0.5, 40ft=1) — rfOff면 RF(리퍼) 컨테이너 제외
@@ -65,11 +67,16 @@ interface Props {
   bookings: Booking[]
   profiles: Profile[]
   initialGroups: ScheduleDestGroup[]
+  initialBlankWeeks?: Record<string, number[]>
   destinationSortOrder?: string[]
 }
 
-export default function ScheduleNewTab({ bookings, profiles, initialGroups, destinationSortOrder = [] }: Props) {
+export default function ScheduleNewTab({
+  bookings, profiles, initialGroups, initialBlankWeeks = {}, destinationSortOrder = [],
+}: Props) {
   const [groups, setGroups] = useState<ScheduleDestGroup[]>(initialGroups)
+  const [blankWeeks, setBlankWeeks] = useState<Record<string, number[]>>(initialBlankWeeks)
+  const [weekCfgOpen, setWeekCfgOpen] = useState(false)
   const [handlerIds, setHandlerIds] = useState<string[]>([])          // 빈 배열 = 전체
   // 기본값 = 이번 달 (전부 불러오지 않도록)
   const [month, setMonth] = useState<string>(() => format(new Date(), 'yyyy-MM'))
@@ -107,6 +114,7 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
         doc: fmtKo(b.doc_cutoff_date),
         eta: fmtKo(b.eta),
         qty: '',
+        week: getWeekNum(b.proforma_etd) !== null ? `${getWeekNum(b.proforma_etd)}주차` : '',
       },
       srcDest: b.final_destination || '',
       etdIso: b.proforma_etd || '',
@@ -143,8 +151,8 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
     return (dest: string) => map.get((dest || '').trim().toUpperCase()) || dest || '(미지정)'
   }, [groups])
 
-  // BLANK SAILING 판정 기준 주차 — 선택한 월에 걸친 주차 (전체면 조회된 주차 전부)
-  const targetWeeks = useMemo(() => {
+  // 해당 월에 걸친 주차 (기본값)
+  const monthWeeks = useMemo(() => {
     const set = new Set<number>()
     if (month) {
       const [y, m] = month.split('-').map(Number)
@@ -158,6 +166,12 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
     }
     return [...set].sort((a, b) => a - b)
   }, [month, filteredRows])
+
+  // BLANK SAILING 판정 기준 주차 — 월별 사용자 설정이 있으면 그것을 사용
+  const targetWeeks = useMemo(() => {
+    const saved = month ? blankWeeks[month] : undefined
+    return Array.isArray(saved) ? [...saved].sort((a, b) => a - b) : monthWeeks
+  }, [month, blankWeeks, monthWeeks])
 
   // 그룹핑 + 중복 제거 + 정렬 → 표시 행
   const displayRows = useMemo<DisplayRow[]>(() => {
@@ -190,17 +204,22 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
         if (r.src) cur.srcs.push(r.src)
         if (r.etdIso && (!cur.row.etdIso || r.etdIso < cur.row.etdIso)) cur.row = r
       }
-      const rows: SchedRow[] = [...seen.values()].map(({ row, srcs }) => ({
-        ...row,
-        cells: { ...row.cells, qty: fmtQty(srcs.reduce((s, b) => s + qtyOf(b, rfOff), 0)) },
-      }))
+      const rows: SchedRow[] = [...seen.values()]
+        .map(({ row, srcs }) => {
+          const qtyAll = srcs.reduce((s, b) => s + qtyOf(b, false), 0)
+          const qtyNet = rfOff ? srcs.reduce((s, b) => s + qtyOf(b, true), 0) : qtyAll
+          return { row: { ...row, cells: { ...row.cells, qty: fmtQty(qtyNet) } }, qtyAll, qtyNet }
+        })
+        // RF해제: 리퍼만으로 구성된 행은 아예 제외
+        .filter(({ qtyAll, qtyNet }) => !(rfOff && qtyAll > 0 && qtyNet === 0))
+        .map(({ row }) => row)
       // 비어있는 주차 → BLANK SAILING 행 추가
       if (showBlank) {
         const present = new Set(rows.map(r => r.weekNum).filter(w => w !== null) as number[])
         for (const w of targetWeeks) {
           if (present.has(w)) continue
           rows.push({
-            cells: { dest: '', carrier: '', vessel: `BLANK SAILING (${w}주차)`, etd_first: '', etd_curr: '', sliding: '', doc: '', eta: '', qty: '' },
+            cells: { dest: '', carrier: '', vessel: 'BLANK SAILING', etd_first: '', etd_curr: '', sliding: '', doc: '', eta: '', qty: '', week: `${w}주차` },
             srcDest: '', etdIso: getWeekStartDate(w), handlerId: '', month: '',
             src: null, weekNum: w, blank: true,
           })
@@ -446,6 +465,15 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
             <input type="checkbox" checked={showBlank} onChange={e => setShowBlank(e.target.checked)} />
             BLANK SAILING 표시
           </label>
+          {showBlank && (
+            <button onClick={() => { if (!month) { alert('출항월을 먼저 선택하세요.'); return } setWeekCfgOpen(true) }}
+              className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium transition-colors ${
+                month && blankWeeks[month] ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              }`}
+              title="BLANK SAILING으로 표시할 주차를 직접 지정 (월별 저장)">
+              주차 설정 ({targetWeeks.length}){month && blankWeeks[month] ? ' ✎' : ''}
+            </button>
+          )}
           <div className="flex-1" />
           {filterCount > 0 && (
             <button onClick={() => setColFilters({})}
@@ -588,6 +616,18 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
         {selRange && ` · 선택 ${selRange.r2 - selRange.r1 + 1}행 × ${selRange.c2 - selRange.c1 + 1}열`}
       </p>
 
+      {weekCfgOpen && month && (
+        <BlankWeekModal
+          month={month}
+          defaultWeeks={monthWeeks}
+          selected={targetWeeks}
+          isCustom={Array.isArray(blankWeeks[month])}
+          onClose={() => setWeekCfgOpen(false)}
+          onSaved={next => { setBlankWeeks(next); setWeekCfgOpen(false) }}
+          allWeeks={blankWeeks}
+        />
+      )}
+
       {mapOpen && (
         <DestMappingModal
           groups={groups}
@@ -596,6 +636,84 @@ export default function ScheduleNewTab({ bookings, profiles, initialGroups, dest
           onSaved={g => { setGroups(g); setMapOpen(false) }}
         />
       )}
+    </div>
+  )
+}
+
+// ── BLANK SAILING 주차 설정 모달 (월별 저장) ────────────────────────
+
+function BlankWeekModal({ month, defaultWeeks, selected, isCustom, allWeeks, onClose, onSaved }: {
+  month: string
+  defaultWeeks: number[]
+  selected: number[]
+  isCustom: boolean
+  allWeeks: Record<string, number[]>
+  onClose: () => void
+  onSaved: (next: Record<string, number[]>) => void
+}) {
+  const [picked, setPicked] = useState<number[]>(selected)
+  const [isPending, startTransition] = useTransition()
+  const [err, setErr] = useState<string | null>(null)
+
+  // 후보 주차 = 해당 월의 주차 ± 1주 (앞뒤 주차도 추가할 수 있게)
+  const candidates = useMemo(() => {
+    const base = defaultWeeks.length > 0 ? defaultWeeks : selected
+    if (base.length === 0) return []
+    const min = Math.min(...base) - 1
+    const max = Math.max(...base) + 1
+    const out: number[] = []
+    for (let w = min; w <= max; w++) if (w > 0) out.push(w)
+    return out
+  }, [defaultWeeks, selected])
+
+  const toggle = (w: number) =>
+    setPicked(p => p.includes(w) ? p.filter(x => x !== w) : [...p, w].sort((a, b) => a - b))
+
+  const save = (reset = false) => {
+    const next = { ...allWeeks }
+    if (reset) delete next[month]
+    else next[month] = [...picked].sort((a, b) => a - b)
+    setErr(null)
+    startTransition(async () => {
+      const { error } = await saveScheduleBlankWeeks(next)
+      if (error) { setErr(error); return }
+      onSaved(next)
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-slate-200">
+          <h3 className="font-bold text-slate-900">{month.replace('-', '년 ')}월 BLANK SAILING 주차</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            체크한 주차 중 배가 없는 주차가 BLANK SAILING으로 표시됩니다. 저장하면 이 월에만 적용됩니다.
+            {isCustom && <span className="text-amber-700 font-medium"> (현재 사용자 설정 적용 중)</span>}
+          </p>
+        </div>
+        <div className="p-4 space-y-1.5 max-h-[50vh] overflow-auto">
+          {candidates.map(w => {
+            const isDefault = defaultWeeks.includes(w)
+            return (
+              <label key={w} className="flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                <input type="checkbox" checked={picked.includes(w)} onChange={() => toggle(w)} />
+                <span className={isDefault ? 'text-slate-800' : 'text-slate-400'}>{getWeekLabel(w)}</span>
+                {!isDefault && <span className="text-[10px] text-slate-400">(다른 월)</span>}
+              </label>
+            )
+          })}
+          {candidates.length === 0 && <p className="text-sm text-slate-400 text-center py-4">주차를 계산할 수 없습니다.</p>}
+        </div>
+        <div className="px-5 py-3 border-t border-slate-200 flex items-center gap-2">
+          {err && <span className="text-xs text-red-600 mr-auto">{err}</span>}
+          <button onClick={() => save(true)} disabled={isPending}
+            className="text-sm px-3 py-2 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 mr-auto">기본값으로</button>
+          <button onClick={onClose} className="btn-secondary text-sm">취소</button>
+          <button onClick={() => save(false)} disabled={isPending} className="btn-primary text-sm">
+            {isPending ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

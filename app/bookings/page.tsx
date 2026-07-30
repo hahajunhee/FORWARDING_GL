@@ -28,6 +28,7 @@ export default async function BookingsPage() {
     { data: allocRows },
     { data: closedRows },
     { data: ciRows },
+    { data: blankWeekSetting },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -53,6 +54,7 @@ export default async function BookingsPage() {
     supabase.from('bookings').select('id, is_closed'),
     // CI 업로드 열도 별도 조회 — 마이그레이션 미적용 시 무시
     supabase.from('bookings').select('id, ci_qty, ci_dest, ci_vessel'),
+    supabase.from('global_settings').select('value').eq('key', 'schedule_blank_weeks').single(),
   ])
 
   // seq_no·alloc_qty 병합 (컬럼 없거나 오류 시 무시)
@@ -92,6 +94,7 @@ export default async function BookingsPage() {
       customLists={(customLists || []) as CustomList[]}
       customColumns={(columnDefinitions || []) as ColumnDefinition[]}
       scheduleDestGroups={(destGroupSetting?.value as ScheduleDestGroup[] | null) || []}
+      scheduleBlankWeeks={(blankWeekSetting?.value as Record<string, number[]> | null) || {}}
       regionList={(regionSetting?.value as string[] | null) || []}
       customerList={(customerSetting?.value as string[] | null) || []}
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}
