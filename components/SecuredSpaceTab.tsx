@@ -92,7 +92,7 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
           <h3 className="font-bold text-slate-900">도착지별 주당 기본값</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             한 주에 한 행씩 배정됩니다. 현재 조회 기간은 <b>{weekCount}주</b> — 예: MQC 60 설정 시 주차마다 60이 한 번씩(BLANK SAILING 포함),
-            같은 주의 나머지 행은 0. 확보선복은 실제 값이 있으면 그 값이 우선합니다. 0으로 두면 설정이 삭제됩니다.
+            같은 주의 나머지 행은 0. 확보선복도 주당 기본값으로만 채우며 BLANK SAILING 행은 항상 0입니다. 0으로 두면 설정이 삭제됩니다.
           </p>
         </div>
         <div className="flex-1 overflow-auto p-4">
@@ -327,9 +327,9 @@ export default function SecuredSpaceTab({
           const ciTotal = srcs.reduce((s, b) => s + (calcCiQtyTotal(b) ?? 0), 0)
           const cells: Record<string, string> = {
             ...row.cells,
-            // MQC·확보선복은 정렬 후 주차별로 재배정 (아래 참고)
+            // MQC·확보선복은 정렬 후 주당 기본값으로 재배정 (아래 참고)
             mqc: dec1(Math.max(0, ...srcs.map(b => num(b.mqc)))),
-            secured: dec1(srcs.reduce((s, b) => s + num(b.secured_space), 0)),
+            secured: '0.0',
             // 실선적물량 = CI_수량(총합) 합계 (마감 전이라 값이 없으면 공란)
             actual: ciTotal > 0 ? dec1(ciTotal) : '',
           }
@@ -363,23 +363,25 @@ export default function SecuredSpaceTab({
       })
 
       // 주당 기본값 배정: 한 주에 한 행만 기본값, 같은 주의 나머지 행은 0
+      // 확보선복은 부킹장 값을 쓰지 않고 주당 기본값만 사용하며, BLANK SAILING은 항상 0
       const base = bases[label]
-      if (base) {
-        const usedMqc = new Set<number>()
-        const usedSec = new Set<number>()
-        for (const r of rows) {
-          const w = r.weekNum
-          if (base.mqc > 0) {
-            if (w !== null && !usedMqc.has(w)) { usedMqc.add(w); r.cells.mqc = dec1(base.mqc) }
-            else r.cells.mqc = '0.0'
-          }
-          if (base.secured > 0) {
-            // 실제 확보선복 값이 있으면 그대로 두고, 없을 때만 주당 기본값 사용
-            const actualSec = num(r.cells.secured)
-            if (actualSec > 0) { if (w !== null) usedSec.add(w); continue }
-            if (w !== null && !usedSec.has(w)) { usedSec.add(w); r.cells.secured = dec1(base.secured) }
-            else r.cells.secured = '0.0'
-          }
+      const usedMqc = new Set<number>()
+      const usedSec = new Set<number>()
+      for (const r of rows) {
+        const w = r.weekNum
+        if (base && base.mqc > 0 && w !== null && !usedMqc.has(w)) {
+          usedMqc.add(w)
+          r.cells.mqc = dec1(base.mqc)
+        } else if (base && base.mqc > 0) {
+          r.cells.mqc = '0.0'
+        }
+        if (r.blank) {
+          r.cells.secured = '0.0'   // 선복을 확보하지 못한 주
+        } else if (base && base.secured > 0 && w !== null && !usedSec.has(w)) {
+          usedSec.add(w)
+          r.cells.secured = dec1(base.secured)
+        } else {
+          r.cells.secured = '0.0'
         }
       }
 
@@ -782,7 +784,7 @@ export default function SecuredSpaceTab({
       <p className="text-xs text-slate-400">
         총 {displayRows.length}행 · 도착지 {new Set(displayRows.map(r => r.groupLabel)).size}개 그룹
         {selRange && ` · 선택 ${selRange.r2 - selRange.r1 + 1}행 × ${selRange.c2 - selRange.c1 + 1}열`}
-        {' · MQC·확보선복은 주당 기본값을 한 주에 한 행씩 배정 · 실선적물량은 CI_수량(총합) 합계'}
+        {' · MQC·확보선복은 주당 기본값을 한 주에 한 행씩 배정(BLANK SAILING 확보선복은 0) · 실선적물량은 CI_수량(총합) 합계'}
       </p>
 
       {weekCfgOpen && monthKey && (
