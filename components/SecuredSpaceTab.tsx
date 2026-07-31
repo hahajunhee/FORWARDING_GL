@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { format, parseISO, isValid, addDays } from 'date-fns'
 import type { Booking, Profile, ScheduleDestGroup } from '@/types'
 import { getWeekNum, getWeekStartDate, calcCiQtyTotal } from './BookingTable'
-import { saveEtdSnapshot, deleteEtdSnapshot } from '@/app/bookings/actions'
+import { saveEtdSnapshot, deleteEtdSnapshot, saveSecuredBases } from '@/app/bookings/actions'
 import { qtyOf, fmtKo, DestMappingModal, BlankWeekModal } from './ScheduleNewTab'
 
 // 헤더 색 (양식과 동일)
@@ -44,6 +44,100 @@ const snapLabel = (key: string) => {
   } catch { return `ETD (${key})` }
 }
 
+export interface BaseSetting { mqc: number; secured: number }
+
+// ── 도착지별 주당 기본값 (MQC · 확보선복) ────────────────────────────
+
+function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
+  labels: string[]
+  bases: Record<string, BaseSetting>
+  weekCount: number
+  onClose: () => void
+  onSaved: (next: Record<string, BaseSetting>) => void
+}) {
+  // 화면에 있는 도착지 + 이미 저장된 도착지 모두 표시
+  const rows = useMemo(
+    () => [...new Set([...labels, ...Object.keys(bases)])].sort((a, b) => a.localeCompare(b, 'ko')),
+    [labels, bases])
+  const [draft, setDraft] = useState<Record<string, BaseSetting>>(() => {
+    const d: Record<string, BaseSetting> = {}
+    for (const l of rows) d[l] = { mqc: bases[l]?.mqc ?? 0, secured: bases[l]?.secured ?? 0 }
+    return d
+  })
+  const [isPending, startTransition] = useTransition()
+  const [err, setErr] = useState<string | null>(null)
+
+  const set = (label: string, key: keyof BaseSetting, v: string) =>
+    setDraft(p => ({ ...p, [label]: { ...p[label], [key]: Number(v) || 0 } }))
+
+  const save = () => {
+    const clean: Record<string, BaseSetting> = { ...bases }
+    for (const l of rows) {
+      const d = draft[l]
+      if (!d || (d.mqc === 0 && d.secured === 0)) delete clean[l]
+      else clean[l] = d
+    }
+    setErr(null)
+    startTransition(async () => {
+      const { error } = await saveSecuredBases(clean)
+      if (error) { setErr(error); return }
+      onSaved(clean)
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-slate-200">
+          <h3 className="font-bold text-slate-900">도착지별 주당 기본값</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            한 주에 한 행씩 배정됩니다. 현재 조회 기간은 <b>{weekCount}주</b> — 예: MQC 60 설정 시 주차마다 60이 한 번씩(BLANK SAILING 포함),
+            같은 주의 나머지 행은 0. 확보선복은 실제 값이 있으면 그 값이 우선합니다. 0으로 두면 설정이 삭제됩니다.
+          </p>
+        </div>
+        <div className="flex-1 overflow-auto p-4">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-slate-500 border-b border-slate-200">
+                <th className="text-left py-1.5">도착지</th>
+                <th className="w-32 py-1.5">MQC / 주</th>
+                <th className="w-32 py-1.5">확보선복 / 주</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(l => (
+                <tr key={l} className="border-b border-slate-50">
+                  <td className="py-1.5 whitespace-pre-line font-medium text-slate-800">{l}</td>
+                  <td className="py-1.5 text-center">
+                    <input type="number" step="0.5" min={0} value={draft[l]?.mqc ?? 0}
+                      onChange={e => set(l, 'mqc', e.target.value)}
+                      className="w-24 text-sm border border-slate-300 rounded-lg px-2 py-1 text-center" />
+                  </td>
+                  <td className="py-1.5 text-center">
+                    <input type="number" step="0.5" min={0} value={draft[l]?.secured ?? 0}
+                      onChange={e => set(l, 'secured', e.target.value)}
+                      className="w-24 text-sm border border-slate-300 rounded-lg px-2 py-1 text-center" />
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={3} className="py-6 text-center text-slate-400 text-sm">표시할 도착지가 없습니다.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2">
+          {err && <span className="text-xs text-red-600 mr-auto">{err}</span>}
+          <button onClick={onClose} className="btn-secondary text-sm">취소</button>
+          <button onClick={save} disabled={isPending} className="btn-primary text-sm">
+            {isPending ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface SsRow {
   cells: Record<string, string>
   srcDest: string
@@ -66,15 +160,18 @@ interface Props {
   profiles: Profile[]
   initialGroups: ScheduleDestGroup[]
   initialBlankWeeks?: Record<string, number[]>
+  initialBases?: Record<string, BaseSetting>
   destinationSortOrder?: string[]
 }
 
 export default function SecuredSpaceTab({
-  bookings, profiles, initialGroups, initialBlankWeeks = {}, destinationSortOrder = [],
+  bookings, profiles, initialGroups, initialBlankWeeks = {}, initialBases = {}, destinationSortOrder = [],
 }: Props) {
   const router = useRouter()
   const [groups, setGroups] = useState<ScheduleDestGroup[]>(initialGroups)
   const [blankWeeks, setBlankWeeks] = useState<Record<string, number[]>>(initialBlankWeeks)
+  const [bases, setBases] = useState<Record<string, BaseSetting>>(initialBases)
+  const [baseOpen, setBaseOpen] = useState(false)
   const [handlerIds, setHandlerIds] = useState<string[]>([])
   // PROFORMA ETD 기간 필터 — 기본값: 오늘 +10일이 속한 달의 1일 ~ 말일
   const [etdFrom, setEtdFrom] = useState<string>(() => {
@@ -227,13 +324,14 @@ export default function SecuredSpaceTab({
         .map(({ row, srcs }) => {
           const qtyAll = srcs.reduce((s, b) => s + qtyOf(b, false), 0)
           const qtyNet = rfOff ? srcs.reduce((s, b) => s + qtyOf(b, true), 0) : qtyAll
+          const ciTotal = srcs.reduce((s, b) => s + (calcCiQtyTotal(b) ?? 0), 0)
           const cells: Record<string, string> = {
             ...row.cells,
-            // MQC는 도착지 단위 주간 쿼터라 합산하지 않고 최댓값
+            // MQC·확보선복은 정렬 후 주차별로 재배정 (아래 참고)
             mqc: dec1(Math.max(0, ...srcs.map(b => num(b.mqc)))),
             secured: dec1(srcs.reduce((s, b) => s + num(b.secured_space), 0)),
-            // 실선적물량 = CI_수량(총합) 합계
-            actual: dec1(srcs.reduce((s, b) => s + (calcCiQtyTotal(b) ?? 0), 0)),
+            // 실선적물량 = CI_수량(총합) 합계 (마감 전이라 값이 없으면 공란)
+            actual: ciTotal > 0 ? dec1(ciTotal) : '',
           }
           for (const k of snapKeys) {
             const hit = srcs.map(b => b.etd_history?.[k]).find(Boolean)
@@ -263,6 +361,28 @@ export default function SecuredSpaceTab({
         if (a.etdIso !== b.etdIso) return (a.etdIso || '9999').localeCompare(b.etdIso || '9999')
         return a.cells.vessel.localeCompare(b.cells.vessel)
       })
+
+      // 주당 기본값 배정: 한 주에 한 행만 기본값, 같은 주의 나머지 행은 0
+      const base = bases[label]
+      if (base) {
+        const usedMqc = new Set<number>()
+        const usedSec = new Set<number>()
+        for (const r of rows) {
+          const w = r.weekNum
+          if (base.mqc > 0) {
+            if (w !== null && !usedMqc.has(w)) { usedMqc.add(w); r.cells.mqc = dec1(base.mqc) }
+            else r.cells.mqc = '0.0'
+          }
+          if (base.secured > 0) {
+            // 실제 확보선복 값이 있으면 그대로 두고, 없을 때만 주당 기본값 사용
+            const actualSec = num(r.cells.secured)
+            if (actualSec > 0) { if (w !== null) usedSec.add(w); continue }
+            if (w !== null && !usedSec.has(w)) { usedSec.add(w); r.cells.secured = dec1(base.secured) }
+            else r.cells.secured = '0.0'
+          }
+        }
+      }
+
       rows.forEach((r, i) => out.push({
         ...r,
         groupLabel: label,
@@ -272,7 +392,7 @@ export default function SecuredSpaceTab({
       }))
     }
     return out
-  }, [filteredRows, labelOf, groups, destinationSortOrder, rfOff, showBlank, targetWeeks, snapKeys])
+  }, [filteredRows, labelOf, groups, destinationSortOrder, rfOff, showBlank, targetWeeks, snapKeys, bases])
 
   const cellText = (rowIdx: number, colKey: string, forCopy = false, selTop = -1): string => {
     const row = displayRows[rowIdx]
@@ -510,6 +630,11 @@ export default function SecuredSpaceTab({
             <button onClick={() => setColFilters({})}
               className="text-xs px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100">열 필터 {filterCount}개 해제</button>
           )}
+          <button onClick={() => setBaseOpen(true)}
+            className="text-xs px-3 py-1.5 rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-medium"
+            title="도착지별 주당 MQC·확보선복 기본값">
+            주당 기본값 ({Object.keys(bases).length})
+          </button>
           <button onClick={() => setMapOpen(true)}
             className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 font-medium">
             도착지 매핑 ({groups.length})
@@ -657,7 +782,7 @@ export default function SecuredSpaceTab({
       <p className="text-xs text-slate-400">
         총 {displayRows.length}행 · 도착지 {new Set(displayRows.map(r => r.groupLabel)).size}개 그룹
         {selRange && ` · 선택 ${selRange.r2 - selRange.r1 + 1}행 × ${selRange.c2 - selRange.c1 + 1}열`}
-        {' · MQC는 그룹 내 최댓값, 확보선복·실선적물량은 합계'}
+        {' · MQC·확보선복은 주당 기본값을 한 주에 한 행씩 배정 · 실선적물량은 CI_수량(총합) 합계'}
       </p>
 
       {weekCfgOpen && monthKey && (
@@ -669,6 +794,15 @@ export default function SecuredSpaceTab({
           allWeeks={blankWeeks}
           onClose={() => setWeekCfgOpen(false)}
           onSaved={next => { setBlankWeeks(next); setWeekCfgOpen(false) }}
+        />
+      )}
+      {baseOpen && (
+        <BaseSettingModal
+          labels={[...new Set(displayRows.map(r => r.groupLabel))]}
+          bases={bases}
+          weekCount={targetWeeks.length}
+          onClose={() => setBaseOpen(false)}
+          onSaved={next => { setBases(next); setBaseOpen(false) }}
         />
       )}
       {mapOpen && (

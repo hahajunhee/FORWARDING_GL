@@ -204,6 +204,24 @@ export async function saveScheduleDestGroups(
   return { error: null }
 }
 
+// ── 확보선복취합: 도착지별 주당 기본값(MQC·확보선복) 저장 ────────────
+
+export async function saveSecuredBases(
+  bases: Record<string, { mqc: number; secured: number }>
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'secured_base_settings', value: bases })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 // ── 확보선복취합: 기준일별 ETD 스냅샷 저장 ──────────────────────────
 
 export async function saveEtdSnapshot(
