@@ -217,7 +217,7 @@ export async function saveEtdSnapshot(
 
   const { data: rows, error: selErr } = await supabase
     .from('bookings')
-    .select('id, updated_etd, proforma_etd, etd_history')
+    .select('id, updated_etd, updated_etd_prev, proforma_etd, updated_at, etd_history')
     .in('id', ids)
   if (selErr) {
     if (/etd_history/i.test(selErr.message)) return { error: 'DB 마이그레이션(v22) 실행이 필요합니다.', count: 0 }
@@ -227,7 +227,11 @@ export async function saveEtdSnapshot(
   let count = 0
   let firstErr: string | null = null
   await Promise.all((rows || []).map(async r => {
-    const etd = (r.updated_etd || r.proforma_etd || '') as string
+    // 기준일 시점의 ETD 추정: 그 이후에 수정된 행은 직전 값(updated_etd_prev)을 사용
+    const changedOn = (r.updated_at as string | null)?.slice(0, 10) || ''
+    const etd = (!changedOn || changedOn <= dateKey)
+      ? ((r.updated_etd || r.proforma_etd || '') as string)
+      : ((r.updated_etd_prev || r.updated_etd || r.proforma_etd || '') as string)
     const hist = { ...((r.etd_history as Record<string, string> | null) || {}), [dateKey]: etd }
     const { error } = await supabase.from('bookings').update({ etd_history: hist }).eq('id', r.id)
     if (error) { if (!firstErr) firstErr = error.message } else count++

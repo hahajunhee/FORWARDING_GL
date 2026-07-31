@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect, useTransition } from 'react'
-import { format, parseISO, isValid } from 'date-fns'
+import { format, parseISO, isValid, addDays } from 'date-fns'
 import type { Booking, Profile, ScheduleDestGroup } from '@/types'
 import { saveScheduleDestGroups } from '@/app/bookings/actions'
 import { getWeekNum, getWeekStartDate, getWeekLabel } from './BookingTable'
@@ -78,15 +78,15 @@ export default function ScheduleNewTab({
   const [blankWeeks, setBlankWeeks] = useState<Record<string, number[]>>(initialBlankWeeks)
   const [weekCfgOpen, setWeekCfgOpen] = useState(false)
   const [handlerIds, setHandlerIds] = useState<string[]>([])          // 빈 배열 = 전체
-  // 기본값 = 이번 달 (전부 불러오지 않도록)
-  const [month, setMonth] = useState<string>(() => format(new Date(), 'yyyy-MM'))
+  // 기본값 = 오늘 +10일이 속한 달 (전부 불러오지 않도록)
+  const [month, setMonth] = useState<string>(() => format(addDays(new Date(), 10), 'yyyy-MM'))
   const [colFilters, setColFilters] = useState<Record<string, string[]>>({})
   const [openFilterCol, setOpenFilterCol] = useState<string | null>(null)
   const [filterSearch, setFilterSearch] = useState('')
   const [mapOpen, setMapOpen] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [rfOff, setRfOff] = useState(false)        // RF해제: 리퍼 컨테이너 제외하고 합산
-  const [showBlank, setShowBlank] = useState(false) // 비어있는 주차를 BLANK SAILING으로 표시
+  const [rfOff, setRfOff] = useState(true)         // RF해제(기본 ON): 리퍼만인 행 제외
+  const [showBlank, setShowBlank] = useState(true)  // 비어있는 주차를 BLANK SAILING으로 표시(기본 ON)
 
   // 범위 선택
   const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null)

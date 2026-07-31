@@ -2,9 +2,9 @@
 
 import { useState, useMemo, useRef, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { format, parseISO, isValid } from 'date-fns'
+import { format, parseISO, isValid, addDays } from 'date-fns'
 import type { Booking, Profile, ScheduleDestGroup } from '@/types'
-import { getWeekNum, getWeekStartDate } from './BookingTable'
+import { getWeekNum, getWeekStartDate, calcCiQtyTotal } from './BookingTable'
 import { saveEtdSnapshot, deleteEtdSnapshot } from '@/app/bookings/actions'
 import { qtyOf, fmtKo, DestMappingModal, BlankWeekModal } from './ScheduleNewTab'
 
@@ -29,6 +29,7 @@ const FIXED_TAIL: ColDef[] = [
   { key: 'mqc',     label: 'MQC',          w: 75  },
   { key: 'secured', label: '확보선복',     w: 85  },
   { key: 'actual',  label: '실선적물량',   w: 90, hi: true },
+  { key: 'week',    label: '주차',         w: 75  },
 ]
 
 const num = (v: string | null | undefined): number => {
@@ -75,9 +76,17 @@ export default function SecuredSpaceTab({
   const [groups, setGroups] = useState<ScheduleDestGroup[]>(initialGroups)
   const [blankWeeks, setBlankWeeks] = useState<Record<string, number[]>>(initialBlankWeeks)
   const [handlerIds, setHandlerIds] = useState<string[]>([])
-  const [month, setMonth] = useState<string>(() => format(new Date(), 'yyyy-MM'))
-  const [rfOff, setRfOff] = useState(false)
-  const [showBlank, setShowBlank] = useState(false)
+  // PROFORMA ETD 기간 필터 — 기본값: 오늘 +10일이 속한 달의 1일 ~ 말일
+  const [etdFrom, setEtdFrom] = useState<string>(() => {
+    const d = addDays(new Date(), 10)
+    return format(new Date(d.getFullYear(), d.getMonth(), 1), 'yyyy-MM-dd')
+  })
+  const [etdTo, setEtdTo] = useState<string>(() => {
+    const d = addDays(new Date(), 10)
+    return format(new Date(d.getFullYear(), d.getMonth() + 1, 0), 'yyyy-MM-dd')
+  })
+  const [rfOff, setRfOff] = useState(true)
+  const [showBlank, setShowBlank] = useState(true)
   const [mapOpen, setMapOpen] = useState(false)
   const [weekCfgOpen, setWeekCfgOpen] = useState(false)
   const [colFilters, setColFilters] = useState<Record<string, string[]>>({})
@@ -109,6 +118,7 @@ export default function SecuredSpaceTab({
       doc: fmtKo(b.doc_cutoff_date),
       eta: fmtKo(b.eta),
       mqc: '', secured: '', actual: '',
+      week: getWeekNum(b.proforma_etd) !== null ? `${getWeekNum(b.proforma_etd)}주차` : '',
     },
     srcDest: b.final_destination || '',
     etdIso: b.proforma_etd || '',
@@ -120,9 +130,10 @@ export default function SecuredSpaceTab({
 
   const baseRows = useMemo(() => allRows.filter(r => {
     if (handlerIds.length > 0 && !handlerIds.includes(r.handlerId)) return false
-    if (month && r.month !== month) return false
+    if (etdFrom && (!r.etdIso || r.etdIso < etdFrom)) return false
+    if (etdTo && (!r.etdIso || r.etdIso > etdTo)) return false
     return true
-  }), [allRows, handlerIds, month])
+  }), [allRows, handlerIds, etdFrom, etdTo])
 
   const filteredRows = useMemo(() => baseRows.filter(r => {
     for (const [col, allowed] of Object.entries(colFilters)) {
@@ -157,25 +168,31 @@ export default function SecuredSpaceTab({
     return (dest: string) => map.get((dest || '').trim().toUpperCase()) || dest || '(미지정)'
   }, [groups])
 
+  // 기간에 걸친 주차 (BLANK SAILING 기본 대상)
+  const monthKey = etdFrom ? etdFrom.slice(0, 7) : ''
   const monthWeeks = useMemo(() => {
     const set = new Set<number>()
-    if (month) {
-      const [y, m] = month.split('-').map(Number)
-      const lastDay = new Date(y, m, 0).getDate()
-      for (let d = 1; d <= lastDay; d++) {
-        const w = getWeekNum(`${month}-${String(d).padStart(2, '0')}`)
-        if (w !== null) set.add(w)
+    if (etdFrom && etdTo) {
+      let d = parseISO(etdFrom)
+      const end = parseISO(etdTo)
+      if (isValid(d) && isValid(end)) {
+        let guard = 0
+        while (d <= end && guard++ < 400) {
+          const w = getWeekNum(format(d, 'yyyy-MM-dd'))
+          if (w !== null) set.add(w)
+          d = addDays(d, 1)
+        }
       }
     } else {
       for (const r of filteredRows) if (r.weekNum !== null) set.add(r.weekNum)
     }
     return [...set].sort((a, b) => a - b)
-  }, [month, filteredRows])
+  }, [etdFrom, etdTo, filteredRows])
 
   const targetWeeks = useMemo(() => {
-    const saved = month ? blankWeeks[month] : undefined
+    const saved = monthKey ? blankWeeks[monthKey] : undefined
     return Array.isArray(saved) ? [...saved].sort((a, b) => a - b) : monthWeeks
-  }, [month, blankWeeks, monthWeeks])
+  }, [monthKey, blankWeeks, monthWeeks])
 
   // ── 그룹 병합 → 표시 행 ──────────────────────────────────────────
   const displayRows = useMemo<DisplayRow[]>(() => {
@@ -215,7 +232,8 @@ export default function SecuredSpaceTab({
             // MQC는 도착지 단위 주간 쿼터라 합산하지 않고 최댓값
             mqc: dec1(Math.max(0, ...srcs.map(b => num(b.mqc)))),
             secured: dec1(srcs.reduce((s, b) => s + num(b.secured_space), 0)),
-            actual: dec1(qtyNet),
+            // 실선적물량 = CI_수량(총합) 합계
+            actual: dec1(srcs.reduce((s, b) => s + (calcCiQtyTotal(b) ?? 0), 0)),
           }
           for (const k of snapKeys) {
             const hit = srcs.map(b => b.etd_history?.[k]).find(Boolean)
@@ -232,7 +250,7 @@ export default function SecuredSpaceTab({
           if (present.has(w)) continue
           const cells: Record<string, string> = {
             dest: '', carrier: '', vessel: 'BLANK SAILING', petd: '',
-            doc: '', eta: '', mqc: '', secured: '', actual: '',
+            doc: '', eta: '', mqc: '', secured: '', actual: '', week: `${w}주차`,
           }
           for (const k of snapKeys) cells[`snap_${k}`] = ''
           rows.push({
@@ -357,7 +375,13 @@ export default function SecuredSpaceTab({
 
   const takeSnapshot = () => {
     if (!snapDate) return
-    if (!confirm(`현재 조회된 ${visibleIds.length}건의 UPDATED ETD를 "${snapDate} 기준" 열로 저장합니다.\n계속할까요?`)) return
+    const past = snapDate < format(new Date(), 'yyyy-MM-dd')
+    if (!confirm(
+      `"${snapLabel(snapDate)}" 열을 추가합니다. (조회된 ${visibleIds.length}건)\n`
+      + (past
+        ? '과거 일자입니다. 그 이후에 ETD가 수정된 부킹은 직전 ETD 값으로 채웁니다.\n(정확한 이력은 그 시점에 열을 추가해 두어야 남습니다)\n'
+        : '현재 UPDATED ETD 값으로 채웁니다.\n')
+      + '계속할까요?')) return
     setSnapMsg(null)
     startTransition(async () => {
       const { error, count } = await saveEtdSnapshot(snapDate, visibleIds)
@@ -438,12 +462,6 @@ export default function SecuredSpaceTab({
     })
   }
 
-  const monthOptions = useMemo(() => {
-    const s = new Set<string>()
-    for (const r of allRows) if (r.month) s.add(r.month)
-    return [...s].sort()
-  }, [allRows])
-
   const activeHandlers = useMemo(
     () => profiles.filter(p => p.is_active !== false && allRows.some(r => r.handlerId === p.id)),
     [profiles, allRows])
@@ -467,12 +485,12 @@ export default function SecuredSpaceTab({
           })}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-bold text-slate-500 w-14">출항월</span>
-          <select value={month} onChange={e => setMonth(e.target.value)}
-            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white">
-            <option value="">전체</option>
-            {monthOptions.map(m => <option key={m} value={m}>{m.replace('-', '년 ')}월</option>)}
-          </select>
+          <span className="text-xs font-bold text-slate-500 w-14">출항기간</span>
+          <input type="date" value={etdFrom} onChange={e => setEtdFrom(e.target.value)}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
+          <span className="text-xs text-slate-400">~</span>
+          <input type="date" value={etdTo} onChange={e => setEtdTo(e.target.value)}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
           <span className="text-[11px] text-slate-400">PROFORMA ETD 기준</span>
           <button onClick={() => setRfOff(v => !v)}
             className={`text-xs px-3 py-1.5 rounded-lg border font-medium ${rfOff ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
@@ -482,9 +500,9 @@ export default function SecuredSpaceTab({
             BLANK SAILING 표시
           </label>
           {showBlank && (
-            <button onClick={() => { if (!month) { alert('출항월을 먼저 선택하세요.'); return } setWeekCfgOpen(true) }}
-              className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium ${month && blankWeeks[month] ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
-              주차 설정 ({targetWeeks.length}){month && blankWeeks[month] ? ' ✎' : ''}
+            <button onClick={() => { if (!monthKey) { alert('출항기간을 먼저 지정하세요.'); return } setWeekCfgOpen(true) }}
+              className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium ${monthKey && blankWeeks[monthKey] ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+              주차 설정 ({targetWeeks.length}){monthKey && blankWeeks[monthKey] ? ' ✎' : ''}
             </button>
           )}
           <div className="flex-1" />
@@ -511,7 +529,7 @@ export default function SecuredSpaceTab({
             className="text-xs border border-slate-200 rounded-lg px-2 py-1.5" />
           <button onClick={takeSnapshot} disabled={isPending || visibleIds.length === 0}
             className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium disabled:opacity-40">
-            {isPending ? '저장 중...' : `ETD 스냅샷 저장 (${visibleIds.length}건)`}
+            {isPending ? '처리 중...' : `ETD 스냅 열 추가 (${visibleIds.length}건)`}
           </button>
           {snapKeys.length > 0 && (
             <div className="flex flex-wrap items-center gap-1">
@@ -524,7 +542,9 @@ export default function SecuredSpaceTab({
             </div>
           )}
           {snapMsg && <span className="text-[11px] text-slate-500">{snapMsg}</span>}
-          <span className="text-[11px] text-slate-400">현재 UPDATED ETD를 기준일별로 저장해 ETD 변동 이력을 쌓습니다.</span>
+          <span className="text-[11px] text-slate-400">
+            기준일별 ETD 열을 만듭니다. 날짜가 빠른 열이 왼쪽(Proforma ETD 오른쪽부터), × 로 열 삭제.
+          </span>
         </div>
       </div>
 
@@ -640,12 +660,12 @@ export default function SecuredSpaceTab({
         {' · MQC는 그룹 내 최댓값, 확보선복·실선적물량은 합계'}
       </p>
 
-      {weekCfgOpen && month && (
+      {weekCfgOpen && monthKey && (
         <BlankWeekModal
-          month={month}
+          month={monthKey}
           defaultWeeks={monthWeeks}
           selected={targetWeeks}
-          isCustom={Array.isArray(blankWeeks[month])}
+          isCustom={Array.isArray(blankWeeks[monthKey])}
           allWeeks={blankWeeks}
           onClose={() => setWeekCfgOpen(false)}
           onSaved={next => { setBlankWeeks(next); setWeekCfgOpen(false) }}
