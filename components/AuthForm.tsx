@@ -2,8 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase'
-import { validateInviteCode } from '@/app/actions/auth'
+import { registerUser, loginUser } from '@/app/actions/auth'
+import { passwordPolicyError, PASSWORD_RULE_TEXT } from '@/lib/password'
 import Link from 'next/link'
 
 interface AuthFormProps {
@@ -25,24 +25,25 @@ export default function AuthForm({ mode }: AuthFormProps) {
     e.preventDefault()
     setLoading(true)
     setError(null)
-    const supabase = createClient()
-
     if (mode === 'login') {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) {
-        setError('이메일 또는 비밀번호가 올바르지 않습니다.')
+      // 로그인 처리·실패 횟수 누적은 모두 서버에서 (세션 쿠키도 서버가 설정)
+      const { ok, error } = await loginUser({ email, password })
+      if (!ok) {
+        setError(error ?? '로그인에 실패했습니다.')
       } else {
         router.push('/bookings')
         router.refresh()
       }
     } else {
+      // 화면 안내용 1차 검증 — 최종 검증·계정 생성은 전부 서버에서 수행한다
       if (!name.trim()) {
         setError('이름을 입력해주세요.')
         setLoading(false)
         return
       }
-      if (password.length < 6) {
-        setError('비밀번호는 6자 이상이어야 합니다.')
+      const pwError = passwordPolicyError(password)
+      if (pwError) {
+        setError(pwError)
         setLoading(false)
         return
       }
@@ -52,37 +53,21 @@ export default function AuthForm({ mode }: AuthFormProps) {
         return
       }
 
-      // 초대코드 서버 검증 (서버 액션으로 RLS 우회)
-      const { valid, error: codeError } = await validateInviteCode(inviteCode)
-      if (!valid) {
-        setError(codeError ?? '초대코드가 올바르지 않습니다.')
+      const { ok, error: regError } = await registerUser({
+        name, phone, inviteCode, email, password,
+      })
+      if (!ok) {
+        setError(regError ?? '회원가입에 실패했습니다.')
         setLoading(false)
         return
       }
 
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { name, phone: phone.trim() },
-        },
-      })
-
-      if (error) {
-        if (error.message.includes('already registered')) {
-          setError('이미 사용 중인 이메일입니다.')
-        } else {
-          setError(error.message)
-        }
+      const { ok: loggedIn, error: loginError } = await loginUser({ email, password })
+      if (loggedIn) {
+        router.push('/bookings')
+        router.refresh()
       } else {
-        // 이메일 확인 없이 바로 로그인
-        const { error: loginError } = await supabase.auth.signInWithPassword({ email, password })
-        if (!loginError) {
-          router.push('/bookings')
-          router.refresh()
-        } else {
-          setError('회원가입 완료. 이메일을 확인해주세요.')
-        }
+        setError(loginError ?? '회원가입이 완료되었습니다. 로그인해주세요.')
       }
     }
 
@@ -167,10 +152,13 @@ export default function AuthForm({ mode }: AuthFormProps) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={mode === 'register' ? '6자 이상' : '••••••••'}
+              placeholder={mode === 'register' ? '영문+숫자+특수문자 8자 이상' : '••••••••'}
               required
               className="input-field"
             />
+            {mode === 'register' && (
+              <p className="text-xs text-gray-400 mt-1">{PASSWORD_RULE_TEXT}</p>
+            )}
           </div>
 
           {error && (
