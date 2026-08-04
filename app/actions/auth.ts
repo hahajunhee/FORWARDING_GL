@@ -178,12 +178,13 @@ export async function loginUser(input: {
   const { error } = await supabase.auth.signInWithPassword({ email, password })
 
   if (error) {
-    const { locked, remaining } = await registerFail(key, rec, LOGIN_MAX_FAIL, LOGIN_LOCK_MIN)
+    const { locked } = await registerFail(key, rec, LOGIN_MAX_FAIL, LOGIN_LOCK_MIN)
+    // 실패 메시지 통일 — 계정 존재 여부·남은 시도 횟수 등 부가 정보를 노출하지 않는다
     return {
       ok: false,
       error: locked
         ? `로그인 ${LOGIN_MAX_FAIL}회 실패로 계정이 ${LOGIN_LOCK_MIN}분간 잠겼습니다.`
-        : `${GENERIC}${remaining > 0 && remaining <= 3 ? ` (${remaining}회 남음)` : ''}`,
+        : GENERIC,
     }
   }
 
