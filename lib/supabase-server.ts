@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { secureCookieOptions } from './cookie-options'
 
 // Next.js 15+ - cookies()는 비동기 API
 export async function createClient() {
@@ -18,8 +19,9 @@ export async function createClient() {
         ) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
+              // 인증 쿠키에 HttpOnly·Secure 강제
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              cookieStore.set(name, value, options as any)
+              cookieStore.set(name, value, secureCookieOptions(options) as any)
             )
           } catch {
             // Server Component에서 쿠키 설정 실패 시 무시

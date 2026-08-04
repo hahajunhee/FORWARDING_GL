@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { secureCookieOptions } from '@/lib/cookie-options'
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -16,8 +17,9 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
+            // 인증 쿠키에 HttpOnly·Secure 강제
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            supabaseResponse.cookies.set(name, value, options as any)
+            supabaseResponse.cookies.set(name, value, secureCookieOptions(options) as any)
           )
         },
       },

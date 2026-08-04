@@ -45,8 +45,9 @@ components/
   BookingForm.tsx         # 부킹 폼 (레거시, 인라인 편집으로 대체됨)
 
 lib/
-  supabase.ts             # 브라우저 Supabase 클라이언트 (Client Component에서 사용 금지)
-  supabase-server.ts      # Server Component / Server Action용 클라이언트
+  supabase-server.ts      # Server Component / Server Action용 클라이언트 (인증 쿠키 HttpOnly·Secure)
+  cookie-options.ts       # 인증 쿠키 보안 플래그 강제
+  password.ts             # 비밀번호 복잡도 정책 (서버·클라이언트 공용)
   supabase-admin.ts       # Service Role 클라이언트 (RLS 우회 — 관리자 전용)
   utils.ts                # 유틸 함수
 
@@ -86,7 +87,8 @@ VERCEL_TOKEN=                     # Vercel API 토큰 (배포 자동화용, 선�
 ## 아키텍처 규칙
 
 ### CRITICAL — 반드시 지킬 것
-- **데이터 페칭은 Server Component 또는 Server Action에서만.** Client Component에서 Supabase 직접 호출 금지. `lib/supabase.ts`는 미들웨어 전용.
+- **데이터 페칭·인증은 Server Component 또는 Server Action에서만.** Client Component에서 Supabase 직접 호출 금지.
+  브라우저 클라이언트(`createBrowserClient`)는 사용하지 않는다 — 인증 쿠키에 HttpOnly를 걸 수 없어 XSS 토큰 탈취에 노출된다.
 - **`SUPABASE_SERVICE_ROLE_KEY`는 서버에서만.** `createAdminClient()`는 `app/admin/actions.ts`와 `app/actions/auth.ts`에서만 사용.
 - **`NEXT_PUBLIC_` 접두사 없는 키는 클라이언트 번들에 절대 포함 금지.**
 
