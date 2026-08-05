@@ -9,8 +9,8 @@ import { passwordPolicyError, sanitizeLine, isValidEmail } from '@/lib/password'
 // auth_attempts 테이블(마이그레이션 v23) 사용. 테이블이 없으면 기능만 비활성화되고
 // 로그인/가입 자체는 계속 동작한다(가용성 우선).
 
-const LOGIN_MAX_FAIL = 5
-const LOGIN_LOCK_MIN = 15
+const LOGIN_MAX_FAIL = 5   // 계정 잠금 임계값: 연속 5회 실패
+const LOGIN_LOCK_MIN = 60  // 잠금 기간 60분, 60분 경과 후 실패 카운트 자동 초기화
 const REG_MAX_FAIL = 10
 const REG_LOCK_MIN = 15
 
