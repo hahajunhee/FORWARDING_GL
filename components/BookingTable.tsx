@@ -663,11 +663,15 @@ function BookingEntriesEditor({ entries, onChange, showCi = false }: {
           >
             {CTR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          <input type="number" min={1} max={99}
+          <input type="number" min={0} max={99}
             className="w-10 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:border-blue-400"
-            value={entry.ctr_qty || ''}
-            onChange={e => handleChange(i, 'ctr_qty', parseInt(e.target.value) || 0)}
-            onBlur={e => { if (!parseInt(e.target.value)) handleChange(i, 'ctr_qty', 1) }}
+            // 0도 입력·저장 가능 (빈칸으로 두면 0으로 저장)
+            value={entry.ctr_qty ?? ''}
+            onChange={e => {
+              const v = e.target.value
+              handleChange(i, 'ctr_qty', v === '' ? 0 : Math.max(0, Math.min(99, parseInt(v) || 0)))
+            }}
+            onBlur={e => { if (e.target.value === '') handleChange(i, 'ctr_qty', 0) }}
           />
           {showCi && (() => {
             // C/I 여러 개 지원 (구버전 단일 ci 호환)
@@ -2043,6 +2047,11 @@ export default function BookingTable({
     const scrollLeft = tableWrapperRef.current?.scrollLeft ?? 0
     if (!editMode) setEditMode(true)
     const tempId = `new-${Date.now()}`
+    // 복사본은 마감 체크와 C/I를 항상 비운다 (신규 행이라 마감·CI_수량/도착지/모선명도 미설정)
+    const extraData = { ...(booking.extra_data || {}) }
+    for (const cd of customColumns) {
+      if (isCiLabel(cd.label)) delete extraData[cd.key]
+    }
     setNewRows(prev => [{
       tempId,
       booking_no: keepAll ? (booking.booking_no || '') : '',
@@ -2066,9 +2075,9 @@ export default function BookingTable({
       qty_40_dg: booking.qty_40_dg || 0,
       qty_40_reefer: booking.qty_40_reefer || 0,
       remarks: keepAll ? (booking.remarks || '') : '',
-      extra_data: { ...(booking.extra_data || {}) },
+      extra_data: extraData,
       booking_entries: booking.booking_entries
-        ? booking.booking_entries.map(e => keepAll ? { ...e } : { ...e, no: '' })
+        ? booking.booking_entries.map(e => ({ ...e, no: keepAll ? e.no : '', cis: [], ci: '' }))
         : [{ no: '', ctr_type: '20', ctr_qty: 1 }],
     }, ...prev])
     // 스크롤 위치 복원
