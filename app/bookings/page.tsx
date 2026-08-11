@@ -31,6 +31,7 @@ export default async function BookingsPage() {
     { data: blankWeekSetting },
     { data: etdHistRows },
     { data: securedBaseSetting },
+    { data: teamTruckSetting },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -60,6 +61,7 @@ export default async function BookingsPage() {
     // ETD 스냅샷도 별도 조회 — 마이그레이션 미적용 시 무시
     supabase.from('bookings').select('id, etd_history'),
     supabase.from('global_settings').select('value').eq('key', 'secured_base_settings').single(),
+    supabase.from('global_settings').select('value').eq('key', 'team_truck_dests').single(),
   ])
 
   // seq_no·alloc_qty 병합 (컬럼 없거나 오류 시 무시)
@@ -106,6 +108,7 @@ export default async function BookingsPage() {
       scheduleDestGroups={(destGroupSetting?.value as ScheduleDestGroup[] | null) || []}
       scheduleBlankWeeks={(blankWeekSetting?.value as Record<string, number[]> | null) || {}}
       securedBases={(securedBaseSetting?.value as Record<string, { mqc: number; secured: number }> | null) || {}}
+      teamTruckDests={(teamTruckSetting?.value as string[] | null) || []}
       regionList={(regionSetting?.value as string[] | null) || []}
       customerList={(customerSetting?.value as string[] | null) || []}
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}

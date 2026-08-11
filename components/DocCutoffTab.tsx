@@ -6,6 +6,7 @@ import { ko } from 'date-fns/locale'
 import type { Booking, Profile, ColumnDefinition } from '@/types'
 import { COLUMN_LABELS } from '@/types'
 import { saveDocTemplate } from '@/app/settings/actions'
+import { saveTeamTruckDests } from '@/app/bookings/actions'
 import { formatContainers } from '@/components/BookingTable'
 
 const DEFAULT_TEMPLATE = `{담당자}님,
@@ -24,22 +25,31 @@ function fmtDate(d: string | null | undefined): string {
   try { const p = parseISO(d); return isValid(p) ? format(p, 'MM/dd') : '-' } catch { return '-' }
 }
 
+// 팀트럭 대상 판별 (최종도착지 기준, 대소문자·공백 무시)
+function isTeamTruck(b: Booking, dests: string[]): boolean {
+  const d = (b.final_destination || '').trim().toUpperCase()
+  if (!d) return false
+  return dests.some(x => (x || '').trim().toUpperCase() === d)
+}
+
 // 단일 부킹 요약 문자열
-function bookingLine(b: Booking): string {
+function bookingLine(b: Booking, teamTruck = false): string {
   const etd = fmtDate(b.proforma_etd)
   const nos = (b.booking_entries && b.booking_entries.length > 0)
     ? b.booking_entries.map(e => e.no).join(', ')
     : b.booking_no || '-'
   const containers = formatContainers(b)
-  return `${b.final_destination || '-'} / ${b.vessel_name || '-'} ${b.voyage || ''} / ${b.carrier || '-'} / (${nos}) / POD: ${b.discharge_port || '-'} / ETD: ${etd} // 수량: (${containers})`
+  const base = `${b.final_destination || '-'} / ${b.vessel_name || '-'} ${b.voyage || ''} / ${b.carrier || '-'} / (${nos}) / POD: ${b.discharge_port || '-'} / ETD: ${etd} // 수량: (${containers})`
+  return teamTruck ? `${base} // 팀트럭` : base
 }
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function getFieldValue(booking: Booking, key: string, customColumns: ColumnDefinition[]): string {
+function getFieldValue(booking: Booking, key: string, customColumns: ColumnDefinition[], teamTruckDests: string[] = []): string {
   switch (key) {
+    case 'team_truck': return isTeamTruck(booking, teamTruckDests) ? '팀트럭' : ''
     case 'booking_no': return booking.booking_no || ''
     case 'final_destination': return booking.final_destination || ''
     case 'discharge_port': return booking.discharge_port || ''
@@ -76,9 +86,15 @@ interface Props {
   customColumns: ColumnDefinition[]
   profiles: Profile[]
   currentUserId: string
+  initialTeamTruckDests?: string[]
 }
 
-export default function DocCutoffTab({ bookings, initialTemplate, customColumns, profiles, currentUserId }: Props) {
+export default function DocCutoffTab({
+  bookings, initialTemplate, customColumns, profiles, currentUserId, initialTeamTruckDests = [],
+}: Props) {
+  const [teamTruckDests, setTeamTruckDests] = useState<string[]>(initialTeamTruckDests)
+  const [ttOpen, setTtOpen] = useState(false)
+  const [ttSaveState, setTtSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [handlerFilter, setHandlerFilter] = useState<string>(currentUserId)
   const [template, setTemplate] = useState(initialTemplate || DEFAULT_TEMPLATE)
@@ -102,6 +118,24 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
         setSaveState('saved')
         setTimeout(() => setSaveState('idle'), 2500)
       }
+    })
+  }
+
+  // 부킹장에 존재하는 최종도착지 목록 (팀트럭 선택용)
+  const allDestinations = useMemo(() => {
+    const s = new Set<string>()
+    for (const b of bookings) if (b.final_destination) s.add(b.final_destination)
+    for (const d of teamTruckDests) if (d) s.add(d)
+    return [...s].sort((a, b) => a.localeCompare(b, 'ko'))
+  }, [bookings, teamTruckDests])
+
+  const handleSaveTeamTruck = () => {
+    setTtSaveState('saving')
+    startTransition(async () => {
+      const { error } = await saveTeamTruckDests(teamTruckDests)
+      if (error) { setTtSaveState('error'); return }
+      setTtSaveState('saved')
+      setTimeout(() => setTtSaveState('idle'), 2500)
     })
   }
 
@@ -133,7 +167,7 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
     const customs = customColumns.map(cd => ({
       key: cd.key, label: cd.label, variable: `{${cd.label}}`,
     }))
-    return [...builtins, ...customs]
+    return [...builtins, { key: 'team_truck', label: '팀트럭', variable: '{팀트럭}' }, ...customs]
   }, [customColumns])
 
   const generateEmail = (handler: string, rows: Booking[]): string => {
@@ -143,7 +177,7 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
     // {부킹목록} - 전체 합친 목록 (기존 호환)
     const combinedList = rows.map((b, i) => {
       const prefix = rows.length > 1 ? `${i + 1}. ` : ''
-      return `${prefix}${bookingLine(b)}`
+      return `${prefix}${bookingLine(b, isTeamTruck(b, teamTruckDests))}`
     }).join('\n')
 
     let result = template
@@ -154,7 +188,7 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
 
     // {부킹목록_N} - N번째 부킹 개별 라인
     for (let i = 0; i < rows.length; i++) {
-      result = result.replace(new RegExp(`\\{부킹목록_${i + 1}\\}`, 'g'), bookingLine(rows[i]))
+      result = result.replace(new RegExp(`\\{부킹목록_${i + 1}\\}`, 'g'), bookingLine(rows[i], isTeamTruck(rows[i], teamTruckDests)))
     }
     result = result.replace(/\{부킹목록_\d+\}/g, '')
 
@@ -185,13 +219,13 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
       const escapedLabel = escapeRegex(fv.label)
       // {label_N} 치환
       for (let i = 0; i < rows.length; i++) {
-        const valN = getFieldValue(rows[i], fv.key, customColumns)
+        const valN = getFieldValue(rows[i], fv.key, customColumns, teamTruckDests)
         result = result.replace(new RegExp(`\\{${escapedLabel}_${i + 1}\\}`, 'g'), valN)
       }
       // 사용되지 않은 {label_N} 제거
       result = result.replace(new RegExp(`\\{${escapedLabel}_\\d+\\}`, 'g'), '')
       // {label} → 첫 번째 행 값
-      const val = rows.length > 0 ? getFieldValue(rows[0], fv.key, customColumns) : ''
+      const val = rows.length > 0 ? getFieldValue(rows[0], fv.key, customColumns, teamTruckDests) : ''
       result = result.replace(new RegExp(`\\{${escapedLabel}\\}`, 'g'), val)
     }
 
@@ -275,6 +309,19 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
             </div>
           )}
 
+          <div>
+            <label className="text-xs text-gray-500 block mb-1 font-medium">팀트럭 도착지</label>
+            <button onClick={() => setTtOpen(v => !v)}
+              className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${
+                teamTruckDests.length > 0
+                  ? 'bg-amber-50 text-amber-800 border-amber-300 font-medium'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+              title="선택한 최종도착지의 부킹은 메일 초안에 '팀트럭'이 표기됩니다">
+              팀트럭 설정 ({teamTruckDests.length})
+            </button>
+          </div>
+
           <div className="ml-auto text-sm">
             {filtered.length > 0
               ? <span className="text-red-600 font-semibold">{filtered.length}건 {handlerFilter ? '(필터)' : ''} / 전체 {totalForDate}건</span>
@@ -283,6 +330,47 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
           </div>
         </div>
       </div>
+
+      {/* 팀트럭 도착지 선택 */}
+      {ttOpen && (
+        <div className="bg-white rounded-xl border border-amber-200 p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-sm text-gray-900">팀트럭 도착지</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                선택한 최종도착지의 부킹은 메일 초안 각 줄 끝에 <b>// 팀트럭</b>이 붙습니다. 나머지는 기존과 동일합니다.
+                (템플릿에서 <code className="bg-gray-100 px-1 rounded">{'{팀트럭}'}</code> 변수로도 사용 가능)
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {ttSaveState === 'saved' && <span className="text-xs text-green-600 font-medium">✓ 저장됨</span>}
+              {ttSaveState === 'error' && <span className="text-xs text-red-600">저장 실패</span>}
+              <button onClick={handleSaveTeamTruck} disabled={isPending}
+                className="text-xs px-3 py-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                {ttSaveState === 'saving' ? '저장 중...' : '저장'}
+              </button>
+              <button onClick={() => setTtOpen(false)}
+                className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">닫기</button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {allDestinations.map(d => {
+              const on = teamTruckDests.some(x => x.trim().toUpperCase() === d.trim().toUpperCase())
+              return (
+                <button key={d}
+                  onClick={() => setTeamTruckDests(prev => on
+                    ? prev.filter(x => x.trim().toUpperCase() !== d.trim().toUpperCase())
+                    : [...prev, d])}
+                  className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                    on ? 'bg-amber-500 text-white border-amber-500 font-medium'
+                       : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}>{d}</button>
+              )
+            })}
+            {allDestinations.length === 0 && <span className="text-xs text-gray-400">등록된 최종도착지가 없습니다.</span>}
+          </div>
+        </div>
+      )}
 
       {/* 메일 초안 카드 - 담당자별 */}
       {groups.length > 0 && (
@@ -313,6 +401,9 @@ export default function DocCutoffTab({ bookings, initialTemplate, customColumns,
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-medium text-gray-800">{b.final_destination || '-'}</span>
+                          {isTeamTruck(b, teamTruckDests) && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">팀트럭</span>
+                          )}
                           <span className="text-gray-400">/</span>
                           <span className="text-gray-600">{b.vessel_name} {b.voyage}</span>
                           <span className="text-gray-400">/</span>
