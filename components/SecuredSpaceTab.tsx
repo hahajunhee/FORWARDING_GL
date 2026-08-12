@@ -395,6 +395,10 @@ export default function SecuredSpaceTab({
           r.cells.secured = dec1(r.qty ?? 0)
           r.cells.actual = ''
         }
+        // 확보선복은 실선적물량보다 작을 수 없다 — 작으면 실선적물량 값으로 맞춘다
+        if (r.cells.secured !== '' && r.cells.actual !== '' && num(r.cells.secured) < num(r.cells.actual)) {
+          r.cells.secured = r.cells.actual
+        }
       }
 
       rows.forEach((r, i) => out.push({
@@ -796,7 +800,7 @@ export default function SecuredSpaceTab({
       <p className="text-xs text-slate-400">
         총 {displayRows.length}행 · 도착지 {new Set(displayRows.map(r => r.groupLabel)).size}개 그룹
         {selRange && ` · 선택 ${selRange.r2 - selRange.r1 + 1}행 × ${selRange.c2 - selRange.c1 + 1}열`}
-        {' · MQC는 체크된 주차마다 1개씩 · 마감 지난 행은 확보선복=주당 MQC·실선적물량=컨테이너 수량, 마감 전은 확보선복=컨테이너 수량·실선적물량 공란 · BLANK SAILING은 공란'}
+        {' · MQC는 체크된 주차마다 1개씩 · 마감 지난 행은 확보선복=주당 MQC·실선적물량=컨테이너 수량, 마감 전은 확보선복=컨테이너 수량·실선적물량 공란 · BLANK SAILING은 공란 · 확보선복 < 실선적물량이면 실선적물량 값으로 표시'}
       </p>
 
       {weekCfgOpen && monthKey && (
