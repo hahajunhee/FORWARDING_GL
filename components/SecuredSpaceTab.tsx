@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { format, parseISO, isValid, addDays } from 'date-fns'
 import type { Booking, Profile, ScheduleDestGroup } from '@/types'
-import { getWeekNum, getWeekStartDate, calcCiQtyTotal } from './BookingTable'
+import { getWeekNum, getWeekStartDate } from './BookingTable'
 import { saveEtdSnapshot, deleteEtdSnapshot, saveSecuredBases } from '@/app/bookings/actions'
 import { qtyOf, fmtKo, DestMappingModal, BlankWeekModal } from './ScheduleNewTab'
 
@@ -46,7 +46,7 @@ const snapLabel = (key: string) => {
 
 export interface BaseSetting { mqc: number; secured: number }
 
-// ── 도착지별 주당 기본값 (MQC · 확보선복) ────────────────────────────
+// ── 도착지별 주당 MQC 기본값 ─────────────────────────────────────────
 
 function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
   labels: string[]
@@ -91,9 +91,9 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
         <div className="px-5 py-3 border-b border-slate-200">
           <h3 className="font-bold text-slate-900">도착지별 주당 MQC</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            한 주에 한 행씩 배정됩니다. 현재 조회 기간은 <b>{weekCount}주</b> — 예: MQC 60 설정 시 주차마다 60이 한 번씩(BLANK SAILING 포함),
-            같은 주의 나머지 행은 0. 0으로 두면 설정이 삭제됩니다.
-            <br />확보선복은 부킹장 컨테이너 수량을 그대로 가져오므로 별도 설정이 없습니다.
+            주차 설정에 체크된 주차마다 한 행씩 배정됩니다. 현재 대상 주차는 <b>{weekCount}개</b> — 예: MQC 60이면 60이
+            정확히 {weekCount}번만 표시되고(BLANK SAILING 포함) 같은 주의 나머지 행은 0. 0으로 두면 설정이 삭제됩니다.
+            <br />확보선복은 서류마감이 지난 행에서 이 MQC 값과 같아집니다.
           </p>
         </div>
         <div className="flex-1 overflow-auto p-4">
@@ -142,6 +142,8 @@ interface SsRow {
   weekNum: number | null
   src: Booking | null
   blank?: boolean
+  qty?: number        // 컨테이너 수량 합계 (20ft=0.5, 40ft=1)
+  docPassed?: boolean // 서류마감일 < 오늘
 }
 interface DisplayRow extends SsRow {
   groupLabel: string
@@ -287,6 +289,7 @@ export default function SecuredSpaceTab({
   }, [monthKey, blankWeeks, monthWeeks])
 
   // ── 그룹 병합 → 표시 행 ──────────────────────────────────────────
+  const todayIso = format(new Date(), 'yyyy-MM-dd')
   const displayRows = useMemo<DisplayRow[]>(() => {
     const byLabel = new Map<string, SsRow[]>()
     for (const r of filteredRows) {
@@ -319,21 +322,22 @@ export default function SecuredSpaceTab({
         .map(({ row, srcs }) => {
           const qtyAll = srcs.reduce((s, b) => s + qtyOf(b, false), 0)
           const qtyNet = rfOff ? srcs.reduce((s, b) => s + qtyOf(b, true), 0) : qtyAll
-          const ciTotal = srcs.reduce((s, b) => s + (calcCiQtyTotal(b) ?? 0), 0)
           const cells: Record<string, string> = {
             ...row.cells,
-            // MQC는 정렬 후 주당 기본값으로 재배정 (아래 참고)
+            // MQC·확보선복·실선적물량은 정렬 후 일괄 계산 (아래 참고)
             mqc: dec1(Math.max(0, ...srcs.map(b => num(b.mqc)))),
-            // 확보선복 = 부킹장 컨테이너 수량 합계 (20ft=0.5, 40ft=1 / RF해제 반영)
-            secured: dec1(qtyNet),
-            // 실선적물량 = CI_수량(총합) 합계 (마감 전이라 값이 없으면 공란)
-            actual: ciTotal > 0 ? dec1(ciTotal) : '',
+            secured: '', actual: '',
           }
           for (const k of snapKeys) {
             const hit = srcs.map(b => b.etd_history?.[k]).find(Boolean)
             cells[`snap_${k}`] = fmtKo(hit || '')
           }
-          return { row: { ...row, cells }, qtyAll, qtyNet }
+          // 서류마감일이 오늘보다 이전이면 '마감 지남'
+          const docIso = srcs.map(b => b.doc_cutoff_date || '').filter(Boolean).sort()[0] || ''
+          return {
+            row: { ...row, cells, qty: qtyNet, docPassed: !!docIso && docIso < todayIso },
+            qtyAll, qtyNet,
+          }
         })
         .filter(({ qtyAll, qtyNet }) => !(rfOff && qtyAll > 0 && qtyNet === 0))
         .map(({ row }) => row)
@@ -344,7 +348,7 @@ export default function SecuredSpaceTab({
           if (present.has(w)) continue
           const cells: Record<string, string> = {
             dest: '', carrier: '', vessel: 'BLANK SAILING', petd: '',
-            doc: '', eta: '', mqc: '', secured: '', actual: '', week: `${w}주차`,
+            doc: '', eta: '', mqc: '', secured: '0.0', actual: '0.0', week: `${w}주차`,
           }
           for (const k of snapKeys) cells[`snap_${k}`] = ''
           rows.push({
@@ -358,19 +362,35 @@ export default function SecuredSpaceTab({
         return a.cells.vessel.localeCompare(b.cells.vessel)
       })
 
-      // MQC 주당 기본값 배정: 한 주에 한 행만 기본값, 같은 주의 나머지 행은 0
-      // (확보선복은 부킹장 컨테이너 수량을 그대로 쓰고, BLANK SAILING은 0)
+      // MQC: 주차 설정에 체크된 주차에만, 주차당 한 행씩 위에서부터 순서대로 배정
+      //      (체크 주차가 4개면 모선이 5개여도 MQC는 4개만 표시)
+      // 확보선복·실선적물량: 서류마감일 기준으로 값이 바뀐다
+      //   마감 지남  → 확보선복 = MQC값,           실선적물량 = 컨테이너 수량 합계
+      //   마감 전·당일 → 확보선복 = 컨테이너 수량 합계, 실선적물량 = 공란
+      //   BLANK SAILING → 확보선복·실선적물량 모두 0
       const base = bases[label]
+      const weekSet = new Set(targetWeeks)
       const usedMqc = new Set<number>()
       for (const r of rows) {
         const w = r.weekNum
-        if (base && base.mqc > 0 && w !== null && !usedMqc.has(w)) {
-          usedMqc.add(w)
-          r.cells.mqc = dec1(base.mqc)
-        } else if (base && base.mqc > 0) {
-          r.cells.mqc = '0.0'
+        if (base && base.mqc > 0) {
+          if (w !== null && weekSet.has(w) && !usedMqc.has(w)) {
+            usedMqc.add(w)
+            r.cells.mqc = dec1(base.mqc)
+          } else {
+            r.cells.mqc = '0.0'
+          }
         }
-        if (r.blank) r.cells.secured = '0.0'   // 선복을 확보하지 못한 주
+        if (r.blank) {
+          r.cells.secured = '0.0'
+          r.cells.actual = '0.0'
+        } else if (r.docPassed) {
+          r.cells.secured = r.cells.mqc || '0.0'
+          r.cells.actual = dec1(r.qty ?? 0)
+        } else {
+          r.cells.secured = dec1(r.qty ?? 0)
+          r.cells.actual = ''
+        }
       }
 
       rows.forEach((r, i) => out.push({
@@ -382,7 +402,7 @@ export default function SecuredSpaceTab({
       }))
     }
     return out
-  }, [filteredRows, labelOf, groups, destinationSortOrder, rfOff, showBlank, targetWeeks, snapKeys, bases])
+  }, [filteredRows, labelOf, groups, destinationSortOrder, rfOff, showBlank, targetWeeks, snapKeys, bases, todayIso])
 
   const cellText = (rowIdx: number, colKey: string, forCopy = false, selTop = -1): string => {
     const row = displayRows[rowIdx]
@@ -772,7 +792,7 @@ export default function SecuredSpaceTab({
       <p className="text-xs text-slate-400">
         총 {displayRows.length}행 · 도착지 {new Set(displayRows.map(r => r.groupLabel)).size}개 그룹
         {selRange && ` · 선택 ${selRange.r2 - selRange.r1 + 1}행 × ${selRange.c2 - selRange.c1 + 1}열`}
-        {' · MQC는 주당 기본값을 한 주에 한 행씩 배정 · 확보선복은 부킹장 컨테이너 수량 합계 · 실선적물량은 CI_수량(총합) 합계'}
+        {' · MQC는 체크된 주차마다 1개씩 · 마감 지난 행은 확보선복=MQC·실선적물량=컨테이너 수량, 마감 전은 확보선복=컨테이너 수량·실선적물량 공란'}
       </p>
 
       {weekCfgOpen && monthKey && (
