@@ -34,6 +34,9 @@ export function qtyOf(b: Booking, rfOff: boolean): number {
   return q20 * 0.5 + q40
 }
 
+// 도착지명에 (RF)가 붙은 리퍼 전용 도착지 — RF해제 시 제외
+export const RF_DEST_RE = /\(\s*RF\s*\)/i
+
 export const fmtQty = (n: number) => n === 0 ? '' : (n % 1 === 0 ? String(n) : n.toFixed(1))
 
 const HEADER_BG = '#FFC000'
@@ -129,8 +132,10 @@ export default function ScheduleNewTab({
   const baseRows = useMemo(() => allRows.filter(r => {
     if (handlerIds.length > 0 && !handlerIds.includes(r.handlerId)) return false
     if (month && r.month !== month) return false
+    // RF해제: 도착지명에 (RF)가 들어간 리퍼 전용 도착지 제외
+    if (rfOff && RF_DEST_RE.test(r.srcDest)) return false
     return true
-  }), [allRows, handlerIds, month])
+  }), [allRows, handlerIds, month, rfOff])
 
   // 열 필터 적용
   const filteredRows = useMemo(() => baseRows.filter(r => {
@@ -178,6 +183,7 @@ export default function ScheduleNewTab({
     const byLabel = new Map<string, SchedRow[]>()
     for (const r of filteredRows) {
       const label = labelOf(r.srcDest)
+      if (rfOff && RF_DEST_RE.test(label)) continue
       if (!byLabel.has(label)) byLabel.set(label, [])
       byLabel.get(label)!.push(r)
     }

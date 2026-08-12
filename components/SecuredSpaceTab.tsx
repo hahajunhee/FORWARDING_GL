@@ -6,7 +6,7 @@ import { format, parseISO, isValid, addDays } from 'date-fns'
 import type { Booking, Profile, ScheduleDestGroup } from '@/types'
 import { getWeekNum, getWeekStartDate } from './BookingTable'
 import { saveEtdSnapshot, deleteEtdSnapshot, saveSecuredBases } from '@/app/bookings/actions'
-import { qtyOf, fmtKo, DestMappingModal, BlankWeekModal } from './ScheduleNewTab'
+import { qtyOf, fmtKo, RF_DEST_RE, DestMappingModal, BlankWeekModal } from './ScheduleNewTab'
 
 // 헤더 색 (양식과 동일)
 const HEAD_BG = '#1F4E79'
@@ -226,8 +226,10 @@ export default function SecuredSpaceTab({
     if (handlerIds.length > 0 && !handlerIds.includes(r.handlerId)) return false
     if (etdFrom && (!r.etdIso || r.etdIso < etdFrom)) return false
     if (etdTo && (!r.etdIso || r.etdIso > etdTo)) return false
+    // RF해제: 도착지명에 (RF)가 들어간 리퍼 전용 도착지 제외
+    if (rfOff && RF_DEST_RE.test(r.srcDest)) return false
     return true
-  }), [allRows, handlerIds, etdFrom, etdTo])
+  }), [allRows, handlerIds, etdFrom, etdTo, rfOff])
 
   const filteredRows = useMemo(() => baseRows.filter(r => {
     for (const [col, allowed] of Object.entries(colFilters)) {
@@ -294,6 +296,7 @@ export default function SecuredSpaceTab({
     const byLabel = new Map<string, SsRow[]>()
     for (const r of filteredRows) {
       const label = labelOf(r.srcDest)
+      if (rfOff && RF_DEST_RE.test(label)) continue
       if (!byLabel.has(label)) byLabel.set(label, [])
       byLabel.get(label)!.push(r)
     }
@@ -632,7 +635,7 @@ export default function SecuredSpaceTab({
           <span className="text-[11px] text-slate-400">PROFORMA ETD 기준</span>
           <button onClick={() => setRfOff(v => !v)}
             className={`text-xs px-3 py-1.5 rounded-lg border font-medium ${rfOff ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-            title="RF(리퍼)로만 구성된 행 제외">RF해제 {rfOff ? 'ON' : 'OFF'}</button>
+            title="RF(리퍼)로만 구성된 행과 도착지명에 (RF)가 붙은 도착지 제외">RF해제 {rfOff ? 'ON' : 'OFF'}</button>
           <label className="flex items-center gap-1.5 text-xs text-slate-600 px-2 py-1.5 rounded-lg border border-slate-200 bg-white cursor-pointer select-none">
             <input type="checkbox" checked={showBlank} onChange={e => setShowBlank(e.target.checked)} />
             BLANK SAILING 표시
