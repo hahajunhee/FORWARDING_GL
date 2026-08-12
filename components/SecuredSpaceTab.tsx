@@ -74,7 +74,7 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
     const clean: Record<string, BaseSetting> = { ...bases }
     for (const l of rows) {
       const d = draft[l]
-      if (!d || (d.mqc === 0 && d.secured === 0)) delete clean[l]
+      if (!d || d.mqc === 0) delete clean[l]
       else clean[l] = d
     }
     setErr(null)
@@ -89,10 +89,11 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-3 border-b border-slate-200">
-          <h3 className="font-bold text-slate-900">도착지별 주당 기본값</h3>
+          <h3 className="font-bold text-slate-900">도착지별 주당 MQC</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             한 주에 한 행씩 배정됩니다. 현재 조회 기간은 <b>{weekCount}주</b> — 예: MQC 60 설정 시 주차마다 60이 한 번씩(BLANK SAILING 포함),
-            같은 주의 나머지 행은 0. 확보선복도 주당 기본값으로만 채우며 BLANK SAILING 행은 항상 0입니다. 0으로 두면 설정이 삭제됩니다.
+            같은 주의 나머지 행은 0. 0으로 두면 설정이 삭제됩니다.
+            <br />확보선복은 부킹장 컨테이너 수량을 그대로 가져오므로 별도 설정이 없습니다.
           </p>
         </div>
         <div className="flex-1 overflow-auto p-4">
@@ -101,7 +102,6 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
               <tr className="text-xs text-slate-500 border-b border-slate-200">
                 <th className="text-left py-1.5">도착지</th>
                 <th className="w-32 py-1.5">MQC / 주</th>
-                <th className="w-32 py-1.5">확보선복 / 주</th>
               </tr>
             </thead>
             <tbody>
@@ -113,15 +113,10 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
                       onChange={e => set(l, 'mqc', e.target.value)}
                       className="w-24 text-sm border border-slate-300 rounded-lg px-2 py-1 text-center" />
                   </td>
-                  <td className="py-1.5 text-center">
-                    <input type="number" step="0.5" min={0} value={draft[l]?.secured ?? 0}
-                      onChange={e => set(l, 'secured', e.target.value)}
-                      className="w-24 text-sm border border-slate-300 rounded-lg px-2 py-1 text-center" />
-                  </td>
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={3} className="py-6 text-center text-slate-400 text-sm">표시할 도착지가 없습니다.</td></tr>
+                <tr><td colSpan={2} className="py-6 text-center text-slate-400 text-sm">표시할 도착지가 없습니다.</td></tr>
               )}
             </tbody>
           </table>
@@ -327,9 +322,10 @@ export default function SecuredSpaceTab({
           const ciTotal = srcs.reduce((s, b) => s + (calcCiQtyTotal(b) ?? 0), 0)
           const cells: Record<string, string> = {
             ...row.cells,
-            // MQC·확보선복은 정렬 후 주당 기본값으로 재배정 (아래 참고)
+            // MQC는 정렬 후 주당 기본값으로 재배정 (아래 참고)
             mqc: dec1(Math.max(0, ...srcs.map(b => num(b.mqc)))),
-            secured: '0.0',
+            // 확보선복 = 부킹장 컨테이너 수량 합계 (20ft=0.5, 40ft=1 / RF해제 반영)
+            secured: dec1(qtyNet),
             // 실선적물량 = CI_수량(총합) 합계 (마감 전이라 값이 없으면 공란)
             actual: ciTotal > 0 ? dec1(ciTotal) : '',
           }
@@ -362,11 +358,10 @@ export default function SecuredSpaceTab({
         return a.cells.vessel.localeCompare(b.cells.vessel)
       })
 
-      // 주당 기본값 배정: 한 주에 한 행만 기본값, 같은 주의 나머지 행은 0
-      // 확보선복은 부킹장 값을 쓰지 않고 주당 기본값만 사용하며, BLANK SAILING은 항상 0
+      // MQC 주당 기본값 배정: 한 주에 한 행만 기본값, 같은 주의 나머지 행은 0
+      // (확보선복은 부킹장 컨테이너 수량을 그대로 쓰고, BLANK SAILING은 0)
       const base = bases[label]
       const usedMqc = new Set<number>()
-      const usedSec = new Set<number>()
       for (const r of rows) {
         const w = r.weekNum
         if (base && base.mqc > 0 && w !== null && !usedMqc.has(w)) {
@@ -375,14 +370,7 @@ export default function SecuredSpaceTab({
         } else if (base && base.mqc > 0) {
           r.cells.mqc = '0.0'
         }
-        if (r.blank) {
-          r.cells.secured = '0.0'   // 선복을 확보하지 못한 주
-        } else if (base && base.secured > 0 && w !== null && !usedSec.has(w)) {
-          usedSec.add(w)
-          r.cells.secured = dec1(base.secured)
-        } else {
-          r.cells.secured = '0.0'
-        }
+        if (r.blank) r.cells.secured = '0.0'   // 선복을 확보하지 못한 주
       }
 
       rows.forEach((r, i) => out.push({
@@ -634,8 +622,8 @@ export default function SecuredSpaceTab({
           )}
           <button onClick={() => setBaseOpen(true)}
             className="text-xs px-3 py-1.5 rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-medium"
-            title="도착지별 주당 MQC·확보선복 기본값">
-            주당 기본값 ({Object.keys(bases).length})
+            title="도착지별 주당 MQC 기본값">
+            주당 MQC ({Object.keys(bases).length})
           </button>
           <button onClick={() => setMapOpen(true)}
             className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 font-medium">
@@ -784,7 +772,7 @@ export default function SecuredSpaceTab({
       <p className="text-xs text-slate-400">
         총 {displayRows.length}행 · 도착지 {new Set(displayRows.map(r => r.groupLabel)).size}개 그룹
         {selRange && ` · 선택 ${selRange.r2 - selRange.r1 + 1}행 × ${selRange.c2 - selRange.c1 + 1}열`}
-        {' · MQC·확보선복은 주당 기본값을 한 주에 한 행씩 배정(BLANK SAILING 확보선복은 0) · 실선적물량은 CI_수량(총합) 합계'}
+        {' · MQC는 주당 기본값을 한 주에 한 행씩 배정 · 확보선복은 부킹장 컨테이너 수량 합계 · 실선적물량은 CI_수량(총합) 합계'}
       </p>
 
       {weekCfgOpen && monthKey && (
