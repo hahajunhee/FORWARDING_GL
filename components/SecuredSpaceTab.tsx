@@ -348,7 +348,7 @@ export default function SecuredSpaceTab({
           if (present.has(w)) continue
           const cells: Record<string, string> = {
             dest: '', carrier: '', vessel: 'BLANK SAILING', petd: '',
-            doc: '', eta: '', mqc: '', secured: '0.0', actual: '0.0', week: `${w}주차`,
+            doc: '', eta: '', mqc: '', secured: '', actual: '', week: `${w}주차`,
           }
           for (const k of snapKeys) cells[`snap_${k}`] = ''
           rows.push({
@@ -382,10 +382,14 @@ export default function SecuredSpaceTab({
           }
         }
         if (r.blank) {
-          r.cells.secured = '0.0'
-          r.cells.actual = '0.0'
+          // BLANK SAILING은 확보선복·실선적물량 모두 공란
+          r.cells.secured = ''
+          r.cells.actual = ''
         } else if (r.docPassed) {
-          r.cells.secured = r.cells.mqc || '0.0'
+          // 마감 지난 행: 확보선복 = MQC값 (같은 주 두 번째 행처럼 0이면 주당 MQC 기본값 사용)
+          const mqcVal = num(r.cells.mqc)
+          const weekly = base && base.mqc > 0 ? base.mqc : mqcVal
+          r.cells.secured = dec1(mqcVal > 0 ? mqcVal : weekly)
           r.cells.actual = dec1(r.qty ?? 0)
         } else {
           r.cells.secured = dec1(r.qty ?? 0)
@@ -792,7 +796,7 @@ export default function SecuredSpaceTab({
       <p className="text-xs text-slate-400">
         총 {displayRows.length}행 · 도착지 {new Set(displayRows.map(r => r.groupLabel)).size}개 그룹
         {selRange && ` · 선택 ${selRange.r2 - selRange.r1 + 1}행 × ${selRange.c2 - selRange.c1 + 1}열`}
-        {' · MQC는 체크된 주차마다 1개씩 · 마감 지난 행은 확보선복=MQC·실선적물량=컨테이너 수량, 마감 전은 확보선복=컨테이너 수량·실선적물량 공란'}
+        {' · MQC는 체크된 주차마다 1개씩 · 마감 지난 행은 확보선복=주당 MQC·실선적물량=컨테이너 수량, 마감 전은 확보선복=컨테이너 수량·실선적물량 공란 · BLANK SAILING은 공란'}
       </p>
 
       {weekCfgOpen && monthKey && (
