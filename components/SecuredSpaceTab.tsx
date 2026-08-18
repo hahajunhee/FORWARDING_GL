@@ -55,10 +55,8 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
   onClose: () => void
   onSaved: (next: Record<string, BaseSetting>) => void
 }) {
-  // 화면에 있는 도착지 + 이미 저장된 도착지 모두 표시
-  const rows = useMemo(
-    () => [...new Set([...labels, ...Object.keys(bases)])].sort((a, b) => a.localeCompare(b, 'ko')),
-    [labels, bases])
+  // '도착지 등록'에 등록된 도착지만, 등록 순서대로 표시
+  const rows = useMemo(() => [...new Set(labels.filter(Boolean))], [labels])
   const [draft, setDraft] = useState<Record<string, BaseSetting>>(() => {
     const d: Record<string, BaseSetting> = {}
     for (const l of rows) d[l] = { mqc: bases[l]?.mqc ?? 0, secured: bases[l]?.secured ?? 0 }
@@ -71,11 +69,10 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
     setDraft(p => ({ ...p, [label]: { ...p[label], [key]: Number(v) || 0 } }))
 
   const save = () => {
-    const clean: Record<string, BaseSetting> = { ...bases }
+    const clean: Record<string, BaseSetting> = {}
     for (const l of rows) {
       const d = draft[l]
-      if (!d || d.mqc === 0) delete clean[l]
-      else clean[l] = d
+      if (d && d.mqc > 0) clean[l] = d
     }
     setErr(null)
     startTransition(async () => {
@@ -93,7 +90,7 @@ function BaseSettingModal({ labels, bases, weekCount, onClose, onSaved }: {
           <p className="text-xs text-slate-500 mt-0.5">
             주차 설정에 체크된 주차마다 한 행씩 배정됩니다. 현재 대상 주차는 <b>{weekCount}개</b> — 예: MQC 60이면 60이
             정확히 {weekCount}번만 표시되고(BLANK SAILING 포함) 같은 주의 나머지 행은 0. 0으로 두면 설정이 삭제됩니다.
-            <br />확보선복은 서류마감이 지난 행에서 이 MQC 값과 같아집니다.
+            <br />목록은 &lsquo;도착지 등록&rsquo;에 등록한 도착지 기준입니다. 확보선복은 서류마감이 지난 행에서 이 MQC 값과 같아집니다.
           </p>
         </div>
         <div className="flex-1 overflow-auto p-4">
@@ -856,7 +853,7 @@ export default function SecuredSpaceTab({
       )}
       {baseOpen && (
         <BaseSettingModal
-          labels={[...new Set(displayRows.map(r => r.groupLabel))]}
+          labels={groups.map(g => g.label)}
           bases={bases}
           weekCount={targetWeeks.length}
           onClose={() => setBaseOpen(false)}
