@@ -259,24 +259,27 @@ export default function SecuredSpaceTab({
   // 도착지 매핑에 등록된 것만 조회 대상 (미등록 도착지는 제외)
   //  · "A & B" 복수 도착지는 순서와 무관하게 집합으로 비교
   //  · 구성 도착지가 각각 같은 그룹이면 그 그룹으로 편입
-  const labelOf = useMemo(() => {
+  // 도착지 등록에 연결된 것만 조회 대상 (미등록 도착지는 제외)
+  //  · "A & B" 복수 도착지는 구성 도착지 중 하나라도 연결돼 있으면 그 도착지에 포함
+  //    (여러 곳에 걸치면 각 도착지에 중복으로 표시)
+  const labelsOf = useMemo(() => {
     const key = (v: string) => splitDests(v).map(x => x.toUpperCase()).sort().join('|')
     const map = new Map<string, string>()
     groups.forEach(g => g.members.forEach(m => {
       const k = key(m || '')
       if (k && !map.has(k)) map.set(k, g.label)
     }))
-    return (dest: string): string | null => {
+    return (dest: string): string[] => {
       const raw = (dest || '').trim()
-      if (!raw) return null
-      const hit = map.get(key(raw))
-      if (hit) return hit
-      const parts = splitDests(raw)
-      if (parts.length > 1) {
-        const mapped = parts.map(p => map.get(key(p)))
-        if (mapped[0] && mapped.every(m => m === mapped[0])) return mapped[0] as string
+      if (!raw) return []
+      const out: string[] = []
+      const whole = map.get(key(raw))      // 복수 도착지 통째로 등록된 경우
+      if (whole) out.push(whole)
+      for (const p of splitDests(raw)) {   // 구성 도착지별 연결
+        const l = map.get(key(p))
+        if (l && !out.includes(l)) out.push(l)
       }
-      return null
+      return out
     }
   }, [groups])
 
@@ -309,20 +312,20 @@ export default function SecuredSpaceTab({
   // 매핑에 없어 제외된 도착지 (사용자에게 안내)
   const unmappedDests = useMemo(() => {
     const s = new Set<string>()
-    for (const r of filteredRows) if (r.srcDest && !labelOf(r.srcDest)) s.add(r.srcDest)
+    for (const r of filteredRows) if (r.srcDest && labelsOf(r.srcDest).length === 0) s.add(r.srcDest)
     return [...s].sort((a, b) => a.localeCompare(b, 'ko'))
-  }, [filteredRows, labelOf])
+  }, [filteredRows, labelsOf])
 
   // ── 그룹 병합 → 표시 행 ──────────────────────────────────────────
   const todayIso = format(new Date(), 'yyyy-MM-dd')
   const displayRows = useMemo<DisplayRow[]>(() => {
     const byLabel = new Map<string, SsRow[]>()
     for (const r of filteredRows) {
-      const label = labelOf(r.srcDest)
-      if (!label) continue                       // 매핑에 없는 도착지는 조회 제외
-      if (rfOff && RF_DEST_RE.test(label)) continue
-      if (!byLabel.has(label)) byLabel.set(label, [])
-      byLabel.get(label)!.push(r)
+      for (const label of labelsOf(r.srcDest)) {  // 등록 안 된 도착지는 결과가 비어 자동 제외
+        if (rfOff && RF_DEST_RE.test(label)) continue
+        if (!byLabel.has(label)) byLabel.set(label, [])
+        byLabel.get(label)!.push(r)
+      }
     }
     const groupOrder = (label: string) => {
       const gi = groups.findIndex(g => g.label === label)
@@ -437,7 +440,7 @@ export default function SecuredSpaceTab({
       }))
     }
     return out
-  }, [filteredRows, labelOf, groups, destinationSortOrder, rfOff, showBlank, targetWeeks, snapKeys, bases, todayIso])
+  }, [filteredRows, labelsOf, groups, destinationSortOrder, rfOff, showBlank, targetWeeks, snapKeys, bases, todayIso])
 
   const cellText = (rowIdx: number, colKey: string, forCopy = false, selTop = -1): string => {
     const row = displayRows[rowIdx]
@@ -454,13 +457,13 @@ export default function SecuredSpaceTab({
     for (const c of COLS) {
       const set = new Set<string>()
       for (const r of baseRows) {
-        if (c.key === 'dest') { const l = labelOf(r.srcDest); if (l) set.add(l) }
+        if (c.key === 'dest') labelsOf(r.srcDest).forEach(l => set.add(l))
         else set.add(r.cells[c.key] || '')
       }
       m[c.key] = [...set].sort((a, b) => a.localeCompare(b, 'ko'))
     }
     return m
-  }, [baseRows, labelOf, COLS])
+  }, [baseRows, labelsOf, COLS])
 
   // ── 범위 선택 · 복사 ─────────────────────────────────────────────
   const selRange = useMemo(() => {
