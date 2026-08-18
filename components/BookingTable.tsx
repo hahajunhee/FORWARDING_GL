@@ -1366,6 +1366,7 @@ export default function BookingTable({
   cellSelEndRef.current = cellSelEnd
   const isMouseSelecting = useRef(false)
   const [isDragSelecting, setIsDragSelecting] = useState(false)
+  const [hideClosed, setHideClosed] = useState(false) // 마감완료 행 숨기기
   const [copyWithHeaders, _setCopyWithHeaders] = useState(false)
   const copyWithHeadersRef = useRef(false)
   const setCopyWithHeaders = (v: boolean) => { _setCopyWithHeaders(v); copyWithHeadersRef.current = v }
@@ -1788,6 +1789,7 @@ export default function BookingTable({
 
   const processed = useMemo(() => {
     let result = bookings.filter(b => {
+      if (hideClosed && b.is_closed) return false
       if (viewMode === 'mine' && b.forwarder_handler_id !== currentUserId) return false
       if (carrierFilter && b.carrier !== carrierFilter) return false
       if (handlerFilter === '__unassigned__' && b.forwarder_handler_id) return false
@@ -1852,7 +1854,7 @@ export default function BookingTable({
       })
     }
     return result
-  }, [bookings, viewMode, carrierFilter, handlerFilter, regionFilter, customersFilter, etdFrom, etdTo, docFilter, sorts, currentUserId, customColumns, reeferSeparate, destinationSortOrder])
+  }, [bookings, viewMode, carrierFilter, handlerFilter, regionFilter, customersFilter, etdFrom, etdTo, docFilter, hideClosed, sorts, currentUserId, customColumns, reeferSeparate, destinationSortOrder])
 
   // processedRef를 항상 최신 processed로 동기화
   useEffect(() => { processedRef.current = processed }, [processed])
@@ -3032,6 +3034,17 @@ export default function BookingTable({
             <input type="checkbox" checked={copyWithHeaders} onChange={e => setCopyWithHeaders(e.target.checked)}
               className="rounded w-3 h-3" />
             열제목 복사
+          </label>
+          <label className={`flex items-center gap-1 text-xs px-2 py-0.5 border rounded cursor-pointer transition-colors ${hideClosed ? 'bg-slate-300 text-slate-800 border-slate-400' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+            title="마감완료로 체크된 행을 목록에서 숨김">
+            <input type="checkbox" checked={hideClosed} onChange={e => setHideClosed(e.target.checked)}
+              className="rounded w-3 h-3" />
+            마감완료 제외
+            {hideClosed && (
+              <span className="text-[10px] font-bold">
+                ({bookings.filter(b => b.is_closed).length})
+              </span>
+            )}
           </label>
         </div>
         {editMode && <span className="text-blue-500 font-medium ml-2">✎ 편집 모드 — 편집 OFF 시 일괄 저장</span>}
