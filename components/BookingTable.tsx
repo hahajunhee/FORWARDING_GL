@@ -773,7 +773,46 @@ export function normalizeDateInput(v: string): string | null {
 //  · 칩으로 표시 / 자동완성 목록에서 클릭 추가
 //  · "A & B", "A, B", 줄바꿈·탭 구분 텍스트 붙여넣기 → 한 번에 추가
 //  · 목록 버튼(☰)으로 체크박스 일괄 선택
-const DEST_SPLIT_RE = /[&,;\t\r\n]+/
+// 도착지명 자체에 콤마가 들어갈 수 있어("ONTARIO, CA") 콤마는 함부로 자르지 않는다.
+//  1) & · 줄바꿈 · 탭 · 세미콜론으로 1차 분리 (도착지명에 쓰이지 않는 구분자)
+//  2) 각 조각이 등록 목록에 있으면 그대로 사용
+//  3) 없으면 등록 목록 기준 최장 일치로 잘라보고, 그래도 안 되면 통째로 사용
+const DEST_SPLIT_RE = /[&;\t\r\n]+/
+
+function greedySplitDest(text: string, opts: string[]): string[] | null {
+  const sorted = [...opts].sort((a, b) => b.length - a.length)
+  let rest = text.trim()
+  const out: string[] = []
+  let guard = 0
+  while (rest && guard++ < 50) {
+    const up = rest.toUpperCase()
+    const hit = sorted.find(o => o && up.startsWith(o.toUpperCase()))
+    if (!hit) return null
+    out.push(hit)
+    rest = rest.slice(hit.length).replace(/^[\s,;&]+/, '')
+  }
+  return rest || out.length === 0 ? null : out
+}
+
+export function parseDestInput(raw: string, options: string[]): string[] {
+  const byUpper = new Map(options.map(o => [o.trim().toUpperCase(), o.trim()]))
+  const out: string[] = []
+  for (const chunk of (raw || '').split(DEST_SPLIT_RE).map(c => c.trim()).filter(Boolean)) {
+    const exact = byUpper.get(chunk.toUpperCase())
+    if (exact) { out.push(exact); continue }
+    if (chunk.includes(',')) {
+      const commaParts = chunk.split(',').map(x => x.trim()).filter(Boolean)
+      if (commaParts.length > 1 && commaParts.every(x => byUpper.has(x.toUpperCase()))) {
+        commaParts.forEach(x => out.push(byUpper.get(x.toUpperCase())!))
+        continue
+      }
+      const greedy = greedySplitDest(chunk, options)
+      if (greedy) { out.push(...greedy); continue }
+    }
+    out.push(chunk)
+  }
+  return out
+}
 
 function MultiDestInput({ value, options, onChange, className, autoFocus }: {
   value: string; options: string[]; onChange: (v: string) => void
@@ -811,7 +850,7 @@ function MultiDestInput({ value, options, onChange, className, autoFocus }: {
   }, [open, checkOpen])
 
   const addMany = (raw: string) => {
-    const list = (raw || '').split(DEST_SPLIT_RE).map(x => x.trim()).filter(Boolean)
+    const list = parseDestInput(raw, options)
     if (list.length === 0) return
     onChange(joinDests([...parts, ...list]))
     setText('')
@@ -862,7 +901,7 @@ function MultiDestInput({ value, options, onChange, className, autoFocus }: {
             if (e.key === 'Enter' && text.trim()) { e.preventDefault(); addMany(text) }
             if (e.key === 'Backspace' && !text && parts.length > 0) removeAt(parts.length - 1)
           }}
-          placeholder={parts.length === 0 ? '최종도착지 (여러 개 붙여넣기 가능)' : '+ 추가'}
+          placeholder={parts.length === 0 ? '최종도착지 (여러 개는 & 로 구분)' : '+ 추가'}
         />
         <button type="button"
           onMouseDown={e => { e.preventDefault(); measure(); setSearch(''); setCheckOpen(v => !v); setOpen(false) }}
