@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect, useTransition } from 'react'
 import { format, parseISO, isValid, addDays } from 'date-fns'
 import type { Booking, Profile, ScheduleDestGroup } from '@/types'
 import { saveScheduleDestGroups } from '@/app/bookings/actions'
-import { getWeekNum, getWeekStartDate, getWeekLabel } from './BookingTable'
+import { getWeekNum, getWeekStartDate, getWeekLabel, splitDests } from './BookingTable'
 import { saveScheduleBlankWeeks } from '@/app/bookings/actions'
 
 // ── 열 정의 (고객사 송부 양식과 동일 순서) ──────────────────────────
@@ -153,7 +153,18 @@ export default function ScheduleNewTab({
       const k = (m || '').trim().toUpperCase()
       if (k && !map.has(k)) map.set(k, g.label)
     }))
-    return (dest: string) => map.get((dest || '').trim().toUpperCase()) || dest || '(미지정)'
+    return (dest: string) => {
+      const raw = (dest || '').trim()
+      const hit = map.get(raw.toUpperCase())
+      if (hit) return hit
+      // "A & B" 복수 도착지: 구성 도착지가 모두 같은 그룹이면 그 그룹으로 묶는다
+      const parts = splitDests(raw)
+      if (parts.length > 1) {
+        const mapped = parts.map(p => map.get(p.toUpperCase()))
+        if (mapped[0] && mapped.every(m => m === mapped[0])) return mapped[0] as string
+      }
+      return raw || '(미지정)'
+    }
   }, [groups])
 
   // 해당 월에 걸친 주차 (기본값)

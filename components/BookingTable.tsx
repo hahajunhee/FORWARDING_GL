@@ -99,6 +99,22 @@ const BASE_COL_DEFS: Record<string, { label: string; minW: number }> = {
   ci_vessel:            { label: 'CI_모선명',        minW: 120 },
 }
 
+// ── 최종도착지 복수 선택 (한 모선이 여러 도착지를 거치는 경우) ──────
+// 저장 형식: "A & B" — 부킹장/주요 스케줄/확보선복취합 모두 이 문자열을 하나의 도착지로 취급
+export const DEST_SEP = ' & '
+
+export function splitDests(v: string | null | undefined): string[] {
+  return (v || '').split('&').map(x => x.trim()).filter(Boolean)
+}
+
+export function joinDests(list: string[]): string {
+  const out: string[] = []
+  for (const d of list.map(x => (x || '').trim()).filter(Boolean)) {
+    if (!out.some(x => x.toUpperCase() === d.toUpperCase())) out.push(d)
+  }
+  return out.join(DEST_SEP)
+}
+
 // pinnedColumns 기준으로 sticky left 오프셋 계산 (colWidths 반영)
 function getFixedLeft(
   col: string,
@@ -753,6 +769,99 @@ export function normalizeDateInput(v: string): string | null {
 // ── 자동완성 입력 ─────────────────────────────────────────────────
 
 // 목록은 portal(document.body)에 fixed로 렌더 — 표의 sticky 셀·스크롤 컨테이너에 가려지지 않음
+// 최종도착지 다중 선택 입력 — 선택된 도착지는 칩으로, 추가 입력은 자동완성
+function MultiDestInput({ value, options, onChange, className, autoFocus }: {
+  value: string; options: string[]; onChange: (v: string) => void
+  className?: string; autoFocus?: boolean
+}) {
+  const parts = splitDests(value)
+  const [text, setText] = useState('')
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+
+  const openList = () => {
+    const el = wrapRef.current
+    if (el) {
+      const r = el.getBoundingClientRect()
+      const openUp = window.innerHeight - r.bottom < 200 && r.top > 200
+      setPos({ left: r.left, top: openUp ? r.top - 2 : r.bottom + 2, width: Math.max(r.width, 160) })
+    }
+    setOpen(true)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e: Event) => {
+      if (listRef.current && e.target instanceof Node && listRef.current.contains(e.target)) return
+      setOpen(false)
+    }
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close) }
+  }, [open])
+
+  const add = (d: string) => {
+    const next = joinDests([...parts, d])
+    onChange(next)
+    setText('')
+    setOpen(false)
+  }
+  const removeAt = (i: number) => onChange(joinDests(parts.filter((_, idx) => idx !== i)))
+
+  const filtered = (text
+    ? options.filter(o => o.toLowerCase().includes(text.toLowerCase()))
+    : options
+  ).filter(o => !parts.some(p => p.toUpperCase() === o.toUpperCase()))
+  const openUp = pos !== null && pos.top < (wrapRef.current?.getBoundingClientRect().top ?? Infinity)
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div className="flex flex-wrap items-center gap-0.5">
+        {parts.map((p, i) => (
+          <span key={`${p}_${i}`}
+            className="inline-flex items-center gap-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded px-1 py-0.5 text-[11px] leading-none max-w-full">
+            <span className="truncate">{p}</span>
+            <button type="button" onMouseDown={e => { e.preventDefault(); removeAt(i) }}
+              className="text-indigo-400 hover:text-red-600 leading-none" title="제거">×</button>
+          </span>
+        ))}
+        <input
+          className={`${className || ''} flex-1 min-w-[70px]`}
+          value={text}
+          autoFocus={autoFocus}
+          onChange={e => { setText(e.target.value); openList() }}
+          onFocus={openList}
+          onBlur={() => setTimeout(() => { setOpen(false); if (text.trim()) add(text) }, 150)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && text.trim()) { e.preventDefault(); add(text) }
+            if (e.key === 'Backspace' && !text && parts.length > 0) removeAt(parts.length - 1)
+          }}
+          placeholder={parts.length === 0 ? '최종도착지' : '+ 추가'}
+        />
+      </div>
+      {open && filtered.length > 0 && pos && typeof document !== 'undefined' && createPortal(
+        <ul ref={listRef}
+          style={{
+            position: 'fixed', left: pos.left, width: pos.width, zIndex: 9999,
+            ...(openUp ? { bottom: window.innerHeight - pos.top } : { top: pos.top }),
+          }}
+          className="bg-white border border-slate-200 rounded-lg shadow-xl max-h-44 overflow-y-auto text-xs">
+          {filtered.map(opt => (
+            <li key={opt}
+              onMouseDown={e => { e.preventDefault(); add(opt) }}
+              className="px-2.5 py-1.5 cursor-pointer hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap">
+              {opt}
+            </li>
+          ))}
+        </ul>,
+        document.body,
+      )}
+    </div>
+  )
+}
+
 function AutocompleteInput({ value, options, onChange, placeholder, className, autoFocus }: {
   value: string; options: string[]; onChange: (v: string) => void
   placeholder?: string; className?: string; autoFocus?: boolean
@@ -885,7 +994,7 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
       )
     }
     case 'final_destination':
-      return <AutocompleteInput className={cls} value={row.final_destination || ''} options={destinations} onChange={v => onChange({ final_destination: v })} placeholder="최종도착지" autoFocus={autoFocus} />
+      return <MultiDestInput className={cls} value={row.final_destination || ''} options={destinations} onChange={v => onChange({ final_destination: v })} autoFocus={autoFocus} />
     case 'discharge_port':
       return <AutocompleteInput className={cls} value={row.discharge_port || ''} options={ports} onChange={v => onChange({ discharge_port: v })} placeholder="양하항" autoFocus={autoFocus} />
     case 'carrier':
@@ -1856,16 +1965,18 @@ export default function BookingTable({
     // 양하항/최종도착지 유효성 검사
     const errors: { field: string; value: string }[] = []
     for (const [, edits] of editEntries) {
-      if (edits.final_destination && !destinations.includes(edits.final_destination as string)) {
-        errors.push({ field: '최종도착지', value: edits.final_destination as string })
+      if (edits.final_destination) {
+        const bad = splitDests(edits.final_destination as string).filter(d => !destinations.includes(d))
+        if (bad.length > 0) errors.push({ field: '최종도착지', value: bad.join(', ') })
       }
       if (edits.discharge_port && !ports.includes(edits.discharge_port as string)) {
         errors.push({ field: '양하항', value: edits.discharge_port as string })
       }
     }
     for (const row of newRows) {
-      if (row.final_destination && !destinations.includes(row.final_destination)) {
-        errors.push({ field: '최종도착지', value: row.final_destination })
+      if (row.final_destination) {
+        const bad = splitDests(row.final_destination).filter(d => !destinations.includes(d))
+        if (bad.length > 0) errors.push({ field: '최종도착지', value: bad.join(', ') })
       }
       if (row.discharge_port && !ports.includes(row.discharge_port)) {
         errors.push({ field: '양하항', value: row.discharge_port })

@@ -7,7 +7,7 @@ import type { Booking, Profile, ColumnDefinition } from '@/types'
 import { COLUMN_LABELS } from '@/types'
 import { saveDocTemplate } from '@/app/settings/actions'
 import { saveTeamTruckDests } from '@/app/bookings/actions'
-import { formatContainers } from '@/components/BookingTable'
+import { formatContainers, splitDests } from '@/components/BookingTable'
 
 const DEFAULT_TEMPLATE = `{담당자}님,
 
@@ -27,9 +27,12 @@ function fmtDate(d: string | null | undefined): string {
 
 // 팀트럭 대상 판별 (최종도착지 기준, 대소문자·공백 무시)
 function isTeamTruck(b: Booking, dests: string[]): boolean {
-  const d = (b.final_destination || '').trim().toUpperCase()
-  if (!d) return false
-  return dests.some(x => (x || '').trim().toUpperCase() === d)
+  const raw = (b.final_destination || '').trim()
+  if (!raw) return false
+  const targets = dests.map(x => (x || '').trim().toUpperCase()).filter(Boolean)
+  if (targets.includes(raw.toUpperCase())) return true
+  // "A & B" 복수 도착지: 한 곳이라도 팀트럭 대상이면 표기
+  return splitDests(raw).some(p => targets.includes(p.toUpperCase()))
 }
 
 // 단일 부킹 요약 문자열
