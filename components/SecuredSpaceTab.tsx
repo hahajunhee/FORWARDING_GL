@@ -691,7 +691,7 @@ export default function SecuredSpaceTab({
           )}
           <button onClick={() => setMapOpen(true)}
             className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 font-medium">
-            도착지 매핑 ({groups.length})
+            도착지 등록 ({groups.length})
           </button>
           <button onClick={copySelection}
             className="text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 font-medium">

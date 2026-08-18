@@ -522,7 +522,7 @@ export default function ScheduleNewTab({
           )}
           <button onClick={() => setMapOpen(true)}
             className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 font-medium">
-            도착지 매핑 ({groups.length})
+            도착지 등록 ({groups.length})
           </button>
           <button onClick={copySelection}
             className="text-xs px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 font-medium">
@@ -766,6 +766,8 @@ export function DestMappingModal({ groups, allDests, onClose, onSaved }: {
   onSaved: (g: ScheduleDestGroup[]) => void
 }) {
   const [draft, setDraft] = useState<ScheduleDestGroup[]>(groups.map(g => ({ ...g, members: [...g.members] })))
+  const [newName, setNewName] = useState('')
+  const [search, setSearch] = useState('')
   const [isPending, startTransition] = useTransition()
   const [err, setErr] = useState<string | null>(null)
 
@@ -782,10 +784,22 @@ export function DestMappingModal({ groups, allDests, onClose, onSaved }: {
     return n
   })
 
+  const addGroup = () => {
+    const name = newName.trim()
+    if (!name) return
+    if (draft.some(g => g.label.trim().toUpperCase() === name.toUpperCase())) {
+      setErr('이미 있는 도착지명입니다.')
+      return
+    }
+    setErr(null)
+    setDraft(p => [...p, { label: name, members: [] }])
+    setNewName('')
+  }
+
   const save = () => {
     const clean = draft
       .map(g => ({ label: g.label.trim(), members: g.members.map(m => m.trim()).filter(Boolean) }))
-      .filter(g => g.label && g.members.length > 0)
+      .filter(g => g.label)
     setErr(null)
     startTransition(async () => {
       const { error } = await saveScheduleDestGroups(clean)
@@ -794,57 +808,86 @@ export function DestMappingModal({ groups, allDests, onClose, onSaved }: {
     })
   }
 
+  const visibleDests = (g: ScheduleDestGroup) => allDests.filter(d =>
+    !search || d.toLowerCase().includes(search.toLowerCase())
+    || g.members.some(m => m.trim().toUpperCase() === d.trim().toUpperCase()))
+
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-3 border-b border-slate-200">
-          <h3 className="font-bold text-slate-900">도착지 매핑</h3>
+          <h3 className="font-bold text-slate-900">도착지 등록</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            이름이 달라도 같은 그룹으로 묶어 하나의 병합 셀로 표시합니다. 표시명은 줄바꿈으로 여러 줄 입력할 수 있습니다.
+            여기에 등록한 도착지만 조회됩니다. 도착지명을 만들고, 그 아래에서 부킹장의 최종도착지를 연결하세요.
+            복수 도착지(&quot;A &amp; B&quot;)도 하나의 항목으로 연결할 수 있습니다.
           </p>
         </div>
 
+        {/* 신규 추가 */}
+        <div className="px-5 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+          <input value={newName} onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addGroup() } }}
+            placeholder="새 도착지명 입력 (예: ONTARIO, CA)"
+            className="flex-1 text-sm border border-slate-300 rounded-lg px-2.5 py-1.5" />
+          <button onClick={addGroup} className="btn-primary text-sm whitespace-nowrap">+ 도착지 추가</button>
+        </div>
+
         <div className="flex-1 overflow-auto p-4 space-y-3">
+          {draft.length > 0 && (
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="최종도착지 검색"
+              className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5" />
+          )}
           {draft.length === 0 && (
-            <p className="text-sm text-slate-400 text-center py-6">매핑이 없습니다. 아래 &lsquo;그룹 추가&rsquo;로 만들어 보세요.</p>
+            <p className="text-sm text-slate-400 text-center py-8">
+              등록된 도착지가 없습니다. 위에서 도착지명을 입력해 추가하세요.
+            </p>
           )}
           {draft.map((g, i) => (
             <div key={i} className="border border-slate-200 rounded-lg p-3 space-y-2">
               <div className="flex items-start gap-2">
-                <textarea value={g.label} onChange={e => update(i, { label: e.target.value })}
-                  rows={Math.max(2, g.label.split('\n').length)}
-                  placeholder={'표시명 (줄바꿈 가능)\n예: ONTARIO(LA)\nJEFFERSON(LA)'}
-                  className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1.5 font-medium resize-y" />
-                <div className="flex flex-col gap-1">
+                <div className="flex-1">
+                  <label className="text-[10px] text-slate-400 font-medium">도착지명 (표시)</label>
+                  <textarea value={g.label} onChange={e => update(i, { label: e.target.value })}
+                    rows={Math.max(1, g.label.split(String.fromCharCode(10)).length)}
+                    placeholder="도착지명 (줄바꿈 가능)"
+                    className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5 font-medium resize-y" />
+                </div>
+                <div className="flex flex-col gap-1 pt-4">
                   <button onClick={() => move(i, -1)} className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">↑</button>
                   <button onClick={() => move(i, 1)} className="text-xs px-2 py-1 bg-slate-100 rounded hover:bg-slate-200">↓</button>
                   <button onClick={() => setDraft(p => p.filter((_, gi) => gi !== i))}
                     className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100">삭제</button>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {allDests.map(d => {
-                  const on = g.members.some(m => m.trim().toUpperCase() === d.trim().toUpperCase())
-                  const takenByOther = !on && used.has(d.trim().toUpperCase())
-                  return (
-                    <button key={d} disabled={takenByOther}
-                      onClick={() => update(i, {
-                        members: on ? g.members.filter(m => m.trim().toUpperCase() !== d.trim().toUpperCase()) : [...g.members, d],
-                      })}
-                      className={`text-[11px] px-2 py-1 rounded border transition-colors ${
-                        on ? 'bg-violet-600 text-white border-violet-600'
-                          : takenByOther ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                      }`}>{d}</button>
-                  )
-                })}
+              <div>
+                <label className="text-[10px] text-slate-400 font-medium">
+                  연결된 부킹장 최종도착지 {g.members.length > 0 && <span className="text-violet-600 font-bold">{g.members.length}개</span>}
+                </label>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {visibleDests(g).map(d => {
+                    const on = g.members.some(m => m.trim().toUpperCase() === d.trim().toUpperCase())
+                    const takenByOther = !on && used.has(d.trim().toUpperCase())
+                    return (
+                      <button key={d} disabled={takenByOther}
+                        onClick={() => update(i, {
+                          members: on ? g.members.filter(m => m.trim().toUpperCase() !== d.trim().toUpperCase()) : [...g.members, d],
+                        })}
+                        className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+                          on ? 'bg-violet-600 text-white border-violet-600'
+                            : takenByOther ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                        }`}
+                        title={takenByOther ? '다른 도착지에 이미 연결됨' : undefined}>{d}</button>
+                    )
+                  })}
+                  {visibleDests(g).length === 0 && (
+                    <span className="text-[11px] text-slate-400">검색 결과가 없습니다.</span>
+                  )}
+                </div>
               </div>
             </div>
           ))}
-          <button onClick={() => setDraft(p => [...p, { label: '', members: [] }])}
-            className="w-full text-sm py-2 border border-dashed border-slate-300 rounded-lg text-slate-500 hover:bg-slate-50">
-            + 그룹 추가
-          </button>
         </div>
 
         <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2">
