@@ -11,7 +11,7 @@ import SecuredSpaceTab from './SecuredSpaceTab'
 import ShanghaiMgmtTab from './ShanghaiMgmtTab'
 import { signOut } from '@/app/bookings/actions'
 import type { Booking, Profile, CustomList, ColumnDefinition, ShanghaiMgmtRow, ScheduleDestGroup } from '@/types'
-import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE } from '@/types'
+import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS } from '@/types'
 
 type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'shanghai'
 
@@ -128,6 +128,11 @@ export default function BookingPageLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false) // 모바일 드로어
 
   const pinnedColumns = currentProfile?.pinned_columns || DEFAULT_PINNED_COLUMNS
+  // 설정(최종도착지 목록) 기준 — 도착지 등록 후보로 사용
+  const destinationOptions = (() => {
+    const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
+    return c.length > 0 ? c : [...DEFAULT_DESTINATIONS]
+  })()
   const docTemplate = currentProfile?.doc_template || null
 
   // 서류마감 D-3 건수 (탭 뱃지용)
@@ -309,6 +314,7 @@ export default function BookingPageLayout({
                 profiles={profiles}
                 initialGroups={scheduleDestGroups}
                 initialBlankWeeks={scheduleBlankWeeks}
+                destinationOptions={destinationOptions}
                 destinationSortOrder={destinationSortOrder}
               />
             </div>
@@ -325,6 +331,7 @@ export default function BookingPageLayout({
                 initialGroups={scheduleDestGroups}
                 initialBlankWeeks={scheduleBlankWeeks}
                 initialBases={securedBases}
+                destinationOptions={destinationOptions}
                 destinationSortOrder={destinationSortOrder}
               />
             </div>

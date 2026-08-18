@@ -71,11 +71,12 @@ interface Props {
   profiles: Profile[]
   initialGroups: ScheduleDestGroup[]
   initialBlankWeeks?: Record<string, number[]>
+  destinationOptions?: string[]   // 설정에 등록된 최종도착지 목록
   destinationSortOrder?: string[]
 }
 
 export default function ScheduleNewTab({
-  bookings, profiles, initialGroups, initialBlankWeeks = {}, destinationSortOrder = [],
+  bookings, profiles, initialGroups, initialBlankWeeks = {}, destinationOptions = [], destinationSortOrder = [],
 }: Props) {
   const [groups, setGroups] = useState<ScheduleDestGroup[]>(initialGroups)
   const [blankWeeks, setBlankWeeks] = useState<Record<string, number[]>>(initialBlankWeeks)
@@ -670,7 +671,8 @@ export default function ScheduleNewTab({
       {mapOpen && (
         <DestMappingModal
           groups={groups}
-          allDests={[...new Set(allRows.map(r => r.srcDest).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))}
+          allDests={[...new Set([...destinationOptions, ...groups.flatMap(g => g.members)].filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'ko'))}
           onClose={() => setMapOpen(false)}
           onSaved={g => { setGroups(g); setMapOpen(false) }}
         />

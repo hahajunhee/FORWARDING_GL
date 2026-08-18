@@ -55,6 +55,7 @@ export async function updateCustomListColor(id: string, color: string | null): P
   return { error: null }
 }
 
+// 목록 항목 이름 변경 — 부킹장의 해당 값과 도착지 등록/팀트럭 설정까지 함께 갱신한다.
 export async function updateCustomListItem(id: string, name: string): Promise<{ error: string | null }> {
   const trimmed = name.trim()
   if (!trimmed) return { error: '이름을 입력해주세요.' }
@@ -63,13 +64,93 @@ export async function updateCustomListItem(id: string, name: string): Promise<{ 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
 
-  const { error } = await supabase
-    .from('custom_lists')
-    .update({ name: trimmed })
-    .eq('id', id)
+  const { data: item, error: getErr } = await supabase
+    .from('custom_lists').select('id, list_type, name').eq('id', id).single()
+  if (getErr || !item) return { error: '항목을 찾을 수 없습니다.' }
 
+  const oldName = (item.name as string) || ''
+  if (oldName === trimmed) return { error: null }
+
+  const { data: dup } = await supabase
+    .from('custom_lists').select('id')
+    .eq('list_type', item.list_type).eq('name', trimmed).maybeSingle()
+  if (dup && dup.id !== id) return { error: '이미 존재하는 항목입니다.' }
+
+  const { error } = await supabase.from('custom_lists').update({ name: trimmed }).eq('id', id)
   if (error) return { error: error.message }
+
+  const eq = (a: string, b: string) => a.trim().toUpperCase() === b.trim().toUpperCase()
+  const field = item.list_type === 'destination' ? 'final_destination'
+    : item.list_type === 'port' ? 'discharge_port' : 'carrier'
+
+  // 부킹장 값 갱신 (최종도착지는 "A & B" 복수 값도 조각 단위로 치환)
+  const { data: rows } = await supabase.from('bookings').select(`id, ${field}`)
+  const updates: { id: string; value: string }[] = []
+  for (const r of (rows || []) as unknown as Record<string, string>[]) {
+    const cur = (r[field] as string) || ''
+    if (!cur) continue
+    let next = cur
+    if (field === 'final_destination' && cur.includes('&')) {
+      const parts = cur.split('&').map(x => x.trim()).filter(Boolean)
+      if (parts.some(x => eq(x, oldName))) {
+        next = parts.map(x => (eq(x, oldName) ? trimmed : x)).join(' & ')
+      }
+    } else if (eq(cur, oldName)) {
+      next = trimmed
+    }
+    if (next !== cur) updates.push({ id: r.id as string, value: next })
+  }
+  for (let i = 0; i < updates.length; i += 20) {
+    await Promise.all(updates.slice(i, i + 20).map(u =>
+      supabase.from('bookings').update({ [field]: u.value }).eq('id', u.id)))
+  }
+
+  // 도착지 등록(주요 스케줄·확보선복취합)·팀트럭 설정의 이름도 함께 갱신
+  if (item.list_type === 'destination') {
+    const renameInText = (v: string) => v.includes('&')
+      ? v.split('&').map(x => x.trim()).filter(Boolean).map(x => (eq(x, oldName) ? trimmed : x)).join(' & ')
+      : (eq(v, oldName) ? trimmed : v)
+
+    const { data: gs } = await supabase
+      .from('global_settings').select('value').eq('key', 'schedule_dest_groups').single()
+    const groups = (gs?.value as { label: string; members: string[] }[] | null) || []
+    if (groups.length > 0) {
+      const nextGroups = groups.map(g => ({
+        label: renameInText(g.label || ''),
+        members: (g.members || []).map(renameInText),
+      }))
+      if (JSON.stringify(nextGroups) !== JSON.stringify(groups)) {
+        await supabase.from('global_settings').upsert({ key: 'schedule_dest_groups', value: nextGroups })
+        // 주당 MQC 설정은 도착지명을 키로 쓰므로 함께 이동
+        const { data: bs } = await supabase
+          .from('global_settings').select('value').eq('key', 'secured_base_settings').single()
+        const bases = (bs?.value as Record<string, unknown> | null) || {}
+        const nextBases: Record<string, unknown> = {}
+        let baseChanged = false
+        for (const [k, v] of Object.entries(bases)) {
+          const nk = renameInText(k)
+          if (nk !== k) baseChanged = true
+          nextBases[nk] = v
+        }
+        if (baseChanged) {
+          await supabase.from('global_settings').upsert({ key: 'secured_base_settings', value: nextBases })
+        }
+      }
+    }
+
+    const { data: tt } = await supabase
+      .from('global_settings').select('value').eq('key', 'team_truck_dests').single()
+    const dests = (tt?.value as string[] | null) || []
+    if (dests.some(d => eq(d, oldName))) {
+      await supabase.from('global_settings').upsert({
+        key: 'team_truck_dests',
+        value: dests.map(d => (eq(d, oldName) ? trimmed : d)),
+      })
+    }
+  }
+
   revalidatePath('/settings')
+  revalidatePath('/bookings')
   return { error: null }
 }
 

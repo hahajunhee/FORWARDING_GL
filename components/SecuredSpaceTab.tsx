@@ -157,12 +157,13 @@ interface Props {
   profiles: Profile[]
   initialGroups: ScheduleDestGroup[]
   initialBlankWeeks?: Record<string, number[]>
+  destinationOptions?: string[]   // 설정에 등록된 최종도착지 목록
   initialBases?: Record<string, BaseSetting>
   destinationSortOrder?: string[]
 }
 
 export default function SecuredSpaceTab({
-  bookings, profiles, initialGroups, initialBlankWeeks = {}, initialBases = {}, destinationSortOrder = [],
+  bookings, profiles, initialGroups, initialBlankWeeks = {}, initialBases = {}, destinationOptions = [], destinationSortOrder = [],
 }: Props) {
   const router = useRouter()
   const [groups, setGroups] = useState<ScheduleDestGroup[]>(initialGroups)
@@ -862,7 +863,8 @@ export default function SecuredSpaceTab({
       {mapOpen && (
         <DestMappingModal
           groups={groups}
-          allDests={[...new Set(allRows.map(r => r.srcDest).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))}
+          allDests={[...new Set([...destinationOptions, ...groups.flatMap(g => g.members)].filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'ko'))}
           onClose={() => setMapOpen(false)}
           onSaved={g => { setGroups(g); setMapOpen(false) }}
         />
