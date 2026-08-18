@@ -769,52 +769,69 @@ export function normalizeDateInput(v: string): string | null {
 // ── 자동완성 입력 ─────────────────────────────────────────────────
 
 // 목록은 portal(document.body)에 fixed로 렌더 — 표의 sticky 셀·스크롤 컨테이너에 가려지지 않음
-// 최종도착지 다중 선택 입력 — 선택된 도착지는 칩으로, 추가 입력은 자동완성
+// 최종도착지 다중 선택 입력
+//  · 칩으로 표시 / 자동완성 목록에서 클릭 추가
+//  · "A & B", "A, B", 줄바꿈·탭 구분 텍스트 붙여넣기 → 한 번에 추가
+//  · 목록 버튼(☰)으로 체크박스 일괄 선택
+const DEST_SPLIT_RE = /[&,;\t\r\n]+/
+
 function MultiDestInput({ value, options, onChange, className, autoFocus }: {
   value: string; options: string[]; onChange: (v: string) => void
   className?: string; autoFocus?: boolean
 }) {
   const parts = splitDests(value)
   const [text, setText] = useState('')
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(false)        // 자동완성 목록
+  const [checkOpen, setCheckOpen] = useState(false) // 체크박스 일괄 선택
+  const [search, setSearch] = useState('')
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
 
-  const openList = () => {
+  const measure = () => {
     const el = wrapRef.current
-    if (el) {
-      const r = el.getBoundingClientRect()
-      const openUp = window.innerHeight - r.bottom < 200 && r.top > 200
-      setPos({ left: r.left, top: openUp ? r.top - 2 : r.bottom + 2, width: Math.max(r.width, 160) })
-    }
-    setOpen(true)
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const openUp = window.innerHeight - r.bottom < 240 && r.top > 240
+    setPos({ left: r.left, top: openUp ? r.top - 2 : r.bottom + 2, width: Math.max(r.width, 180) })
   }
+  const openList = () => { measure(); setOpen(true) }
 
   useEffect(() => {
-    if (!open) return
+    if (!open && !checkOpen) return
     const close = (e: Event) => {
-      if (listRef.current && e.target instanceof Node && listRef.current.contains(e.target)) return
+      const t = e.target
+      if (t instanceof Node && (listRef.current?.contains(t) || panelRef.current?.contains(t))) return
       setOpen(false)
     }
     window.addEventListener('scroll', close, true)
     window.addEventListener('resize', close)
     return () => { window.removeEventListener('scroll', close, true); window.removeEventListener('resize', close) }
-  }, [open])
+  }, [open, checkOpen])
 
-  const add = (d: string) => {
-    const next = joinDests([...parts, d])
-    onChange(next)
+  const addMany = (raw: string) => {
+    const list = (raw || '').split(DEST_SPLIT_RE).map(x => x.trim()).filter(Boolean)
+    if (list.length === 0) return
+    onChange(joinDests([...parts, ...list]))
     setText('')
     setOpen(false)
   }
   const removeAt = (i: number) => onChange(joinDests(parts.filter((_, idx) => idx !== i)))
+  const toggle = (d: string) => {
+    const on = parts.some(p => p.toUpperCase() === d.toUpperCase())
+    onChange(joinDests(on ? parts.filter(p => p.toUpperCase() !== d.toUpperCase()) : [...parts, d]))
+  }
 
   const filtered = (text
     ? options.filter(o => o.toLowerCase().includes(text.toLowerCase()))
     : options
   ).filter(o => !parts.some(p => p.toUpperCase() === o.toUpperCase()))
   const openUp = pos !== null && pos.top < (wrapRef.current?.getBoundingClientRect().top ?? Infinity)
+  const panelStyle = (): React.CSSProperties => ({
+    position: 'fixed', left: pos!.left, width: Math.max(pos!.width, 220), zIndex: 9999,
+    ...(openUp ? { bottom: window.innerHeight - pos!.top } : { top: pos!.top }),
+  })
 
   return (
     <div ref={wrapRef} className="relative">
@@ -828,34 +845,77 @@ function MultiDestInput({ value, options, onChange, className, autoFocus }: {
           </span>
         ))}
         <input
-          className={`${className || ''} flex-1 min-w-[70px]`}
+          className={`${className || ''} flex-1 min-w-[60px]`}
           value={text}
           autoFocus={autoFocus}
           onChange={e => { setText(e.target.value); openList() }}
           onFocus={openList}
-          onBlur={() => setTimeout(() => { setOpen(false); if (text.trim()) add(text) }, 150)}
+          onPaste={e => {
+            // "A & B" · "A, B" · 엑셀 여러 셀 → 한 번에 추가
+            const t = e.clipboardData.getData('text/plain')
+            if (!t) return
+            e.preventDefault()
+            addMany(t)
+          }}
+          onBlur={() => setTimeout(() => { setOpen(false); if (text.trim()) addMany(text) }, 150)}
           onKeyDown={e => {
-            if (e.key === 'Enter' && text.trim()) { e.preventDefault(); add(text) }
+            if (e.key === 'Enter' && text.trim()) { e.preventDefault(); addMany(text) }
             if (e.key === 'Backspace' && !text && parts.length > 0) removeAt(parts.length - 1)
           }}
-          placeholder={parts.length === 0 ? '최종도착지' : '+ 추가'}
+          placeholder={parts.length === 0 ? '최종도착지 (여러 개 붙여넣기 가능)' : '+ 추가'}
         />
+        <button type="button"
+          onMouseDown={e => { e.preventDefault(); measure(); setSearch(''); setCheckOpen(v => !v); setOpen(false) }}
+          className="px-1 text-[11px] leading-none text-slate-400 hover:text-indigo-600 border border-slate-200 rounded bg-white"
+          title="목록에서 여러 개 한 번에 선택">☰</button>
       </div>
-      {open && filtered.length > 0 && pos && typeof document !== 'undefined' && createPortal(
-        <ul ref={listRef}
-          style={{
-            position: 'fixed', left: pos.left, width: pos.width, zIndex: 9999,
-            ...(openUp ? { bottom: window.innerHeight - pos.top } : { top: pos.top }),
-          }}
+
+      {/* 자동완성 */}
+      {open && !checkOpen && filtered.length > 0 && pos && typeof document !== 'undefined' && createPortal(
+        <ul ref={listRef} style={panelStyle()}
           className="bg-white border border-slate-200 rounded-lg shadow-xl max-h-44 overflow-y-auto text-xs">
           {filtered.map(opt => (
             <li key={opt}
-              onMouseDown={e => { e.preventDefault(); add(opt) }}
+              onMouseDown={e => { e.preventDefault(); addMany(opt) }}
               className="px-2.5 py-1.5 cursor-pointer hover:bg-indigo-50 hover:text-indigo-700 whitespace-nowrap">
               {opt}
             </li>
           ))}
         </ul>,
+        document.body,
+      )}
+
+      {/* 체크박스 일괄 선택 */}
+      {checkOpen && pos && typeof document !== 'undefined' && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9998]" onMouseDown={e => { e.preventDefault(); setCheckOpen(false) }} />
+          <div ref={panelRef} style={panelStyle()}
+            className="bg-white border border-slate-300 rounded-lg shadow-2xl p-2 text-xs"
+            onMouseDown={e => e.stopPropagation()}>
+            <div className="flex items-center gap-1 mb-1.5">
+              <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="검색" className="flex-1 border border-slate-200 rounded px-2 py-1" />
+              <button type="button" onMouseDown={e => { e.preventDefault(); onChange('') }}
+                className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 whitespace-nowrap">전체 해제</button>
+            </div>
+            <div className="max-h-52 overflow-y-auto space-y-0.5">
+              {options.filter(o => !search || o.toLowerCase().includes(search.toLowerCase())).map(o => {
+                const on = parts.some(p => p.toUpperCase() === o.toUpperCase())
+                return (
+                  <label key={o} className="flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-indigo-50 cursor-pointer">
+                    <input type="checkbox" checked={on} onChange={() => toggle(o)} className="w-3 h-3" />
+                    <span className="truncate">{o}</span>
+                  </label>
+                )
+              })}
+            </div>
+            <div className="flex items-center justify-between mt-1.5 pt-1.5 border-t border-slate-100">
+              <span className="text-[10px] text-slate-400">{parts.length}개 선택</span>
+              <button type="button" onMouseDown={e => { e.preventDefault(); setCheckOpen(false) }}
+                className="px-2 py-1 rounded bg-indigo-600 text-white">완료</button>
+            </div>
+          </div>
+        </>,
         document.body,
       )}
     </div>
