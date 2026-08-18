@@ -255,23 +255,27 @@ export default function SecuredSpaceTab({
     ...FIXED_TAIL,
   ], [snapKeys])
 
+  // 도착지 매핑에 등록된 것만 조회 대상 (미등록 도착지는 제외)
+  //  · "A & B" 복수 도착지는 순서와 무관하게 집합으로 비교
+  //  · 구성 도착지가 각각 같은 그룹이면 그 그룹으로 편입
   const labelOf = useMemo(() => {
+    const key = (v: string) => splitDests(v).map(x => x.toUpperCase()).sort().join('|')
     const map = new Map<string, string>()
     groups.forEach(g => g.members.forEach(m => {
-      const k = (m || '').trim().toUpperCase()
+      const k = key(m || '')
       if (k && !map.has(k)) map.set(k, g.label)
     }))
-    return (dest: string) => {
+    return (dest: string): string | null => {
       const raw = (dest || '').trim()
-      const hit = map.get(raw.toUpperCase())
+      if (!raw) return null
+      const hit = map.get(key(raw))
       if (hit) return hit
-      // "A & B" 복수 도착지: 구성 도착지가 모두 같은 그룹이면 그 그룹으로 묶는다
       const parts = splitDests(raw)
       if (parts.length > 1) {
-        const mapped = parts.map(p => map.get(p.toUpperCase()))
+        const mapped = parts.map(p => map.get(key(p)))
         if (mapped[0] && mapped.every(m => m === mapped[0])) return mapped[0] as string
       }
-      return raw || '(미지정)'
+      return null
     }
   }, [groups])
 
@@ -301,12 +305,20 @@ export default function SecuredSpaceTab({
     return Array.isArray(saved) ? [...saved].sort((a, b) => a - b) : monthWeeks
   }, [monthKey, blankWeeks, monthWeeks])
 
+  // 매핑에 없어 제외된 도착지 (사용자에게 안내)
+  const unmappedDests = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of filteredRows) if (r.srcDest && !labelOf(r.srcDest)) s.add(r.srcDest)
+    return [...s].sort((a, b) => a.localeCompare(b, 'ko'))
+  }, [filteredRows, labelOf])
+
   // ── 그룹 병합 → 표시 행 ──────────────────────────────────────────
   const todayIso = format(new Date(), 'yyyy-MM-dd')
   const displayRows = useMemo<DisplayRow[]>(() => {
     const byLabel = new Map<string, SsRow[]>()
     for (const r of filteredRows) {
       const label = labelOf(r.srcDest)
+      if (!label) continue                       // 매핑에 없는 도착지는 조회 제외
       if (rfOff && RF_DEST_RE.test(label)) continue
       if (!byLabel.has(label)) byLabel.set(label, [])
       byLabel.get(label)!.push(r)
@@ -440,7 +452,10 @@ export default function SecuredSpaceTab({
     const m: Record<string, string[]> = {}
     for (const c of COLS) {
       const set = new Set<string>()
-      for (const r of baseRows) set.add(c.key === 'dest' ? labelOf(r.srcDest) : (r.cells[c.key] || ''))
+      for (const r of baseRows) {
+        if (c.key === 'dest') { const l = labelOf(r.srcDest); if (l) set.add(l) }
+        else set.add(r.cells[c.key] || '')
+      }
       m[c.key] = [...set].sort((a, b) => a.localeCompare(b, 'ko'))
     }
     return m
@@ -667,6 +682,13 @@ export default function SecuredSpaceTab({
             title="도착지별 주당 MQC 기본값">
             주당 MQC ({Object.keys(bases).length})
           </button>
+          {unmappedDests.length > 0 && (
+            <button onClick={() => setMapOpen(true)}
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 font-medium"
+              title={'매핑에 등록되지 않아 제외된 도착지: ' + unmappedDests.join(', ')}>
+              미매핑 {unmappedDests.length}개 제외
+            </button>
+          )}
           <button onClick={() => setMapOpen(true)}
             className="text-xs px-3 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 font-medium">
             도착지 매핑 ({groups.length})
