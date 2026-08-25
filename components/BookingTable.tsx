@@ -637,10 +637,10 @@ function ContainerEdit({ row, onChange }: { row: Partial<Booking>; onChange: (c:
       {CTR_FIELDS.map(({ key, label }) => (
         <div key={key} className="flex items-center gap-1">
           <span className="text-gray-400 text-xs w-10 shrink-0">{label}</span>
-          <input type="number" min={0} max={99}
+          <input type="number" min={0} max={999}
             value={(row[key] as number) ?? 0}
-            onChange={e => onChange({ [key]: parseInt(e.target.value) || 0 })}
-            className="w-10 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:border-blue-400"
+            onChange={e => onChange({ [key]: Math.max(0, Math.min(999, parseInt(e.target.value) || 0)) })}
+            className="w-14 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:border-blue-400"
           />
         </div>
       ))}
@@ -679,13 +679,13 @@ function BookingEntriesEditor({ entries, onChange, showCi = false }: {
           >
             {CTR_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          <input type="number" min={0} max={99}
-            className="w-10 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:border-blue-400"
-            // 0도 입력·저장 가능 (빈칸으로 두면 0으로 저장)
+          <input type="number" min={0} max={999}
+            className="w-14 border border-gray-200 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:border-blue-400"
+            // 0도 입력·저장 가능 (빈칸으로 두면 0으로 저장), 세 자리까지 허용
             value={entry.ctr_qty ?? ''}
             onChange={e => {
               const v = e.target.value
-              handleChange(i, 'ctr_qty', v === '' ? 0 : Math.max(0, Math.min(99, parseInt(v) || 0)))
+              handleChange(i, 'ctr_qty', v === '' ? 0 : Math.max(0, Math.min(999, parseInt(v) || 0)))
             }}
             onBlur={e => { if (e.target.value === '') handleChange(i, 'ctr_qty', 0) }}
           />
