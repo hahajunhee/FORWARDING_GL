@@ -233,6 +233,7 @@ export default function ReeferCutoffTab({ bookings }: Props) {
                   <th className="px-3 py-2.5 text-left font-bold text-gray-600 border-b border-gray-200 whitespace-nowrap">부킹번호</th>
                   <th className="px-3 py-2.5 text-center font-bold text-gray-600 border-b border-gray-200 whitespace-nowrap">UPDATED ETD</th>
                   <th className="px-3 py-2.5 text-center font-bold text-gray-600 border-b border-gray-200 whitespace-nowrap">ETA</th>
+                  <th className="px-3 py-2.5 text-left font-bold text-gray-600 border-b border-gray-200 whitespace-nowrap">비고</th>
                   <th className="px-3 py-2.5 text-center font-bold text-cyan-700 border-b border-gray-200 whitespace-nowrap bg-cyan-50">컨테이너 픽업일</th>
                   <th className="px-3 py-2.5 text-center font-bold text-cyan-700 border-b border-gray-200 whitespace-nowrap bg-cyan-50">작업일</th>
                   <th className="px-3 py-2.5 text-center font-bold text-cyan-700 border-b border-gray-200 whitespace-nowrap bg-cyan-50">서류마감일</th>
@@ -259,6 +260,9 @@ export default function ReeferCutoffTab({ bookings }: Props) {
                       <td className="px-3 py-2 font-mono text-blue-700 border-b border-gray-100">{nos || '-'}</td>
                       <td className="px-3 py-2 text-center text-gray-700 border-b border-gray-100">{fmtDate(b.updated_etd) || '-'}</td>
                       <td className="px-3 py-2 text-center text-gray-700 border-b border-gray-100">{fmtDate(b.eta) || '-'}</td>
+                      <td className="px-3 py-2 text-gray-500 border-b border-gray-100 max-w-[240px] whitespace-pre-wrap break-words">
+                        {b.remarks || <span className="text-gray-300">-</span>}
+                      </td>
                       {/* 편집 가능 필드 */}
                       <td className="px-1 py-1 border-b border-gray-100 bg-cyan-50/30">
                         <input type="date" value={r.pickupDate}
