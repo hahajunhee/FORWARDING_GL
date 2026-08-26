@@ -35,15 +35,25 @@ function isTeamTruck(b: Booking, dests: string[]): boolean {
   return splitDests(raw).some(p => targets.includes(p.toUpperCase()))
 }
 
+// 도착지 표기 — 팀트럭 대상 도착지에만 괄호로 표시
+// 예: "AURORA, IL(팀트럭) & GROVEPORT, OH(팀트럭) & ONTARIO, CA"
+function destWithTeamTruck(b: Booking, dests: string[]): string {
+  const raw = (b.final_destination || '').trim()
+  if (!raw) return '-'
+  const targets = dests.map(x => (x || '').trim().toUpperCase()).filter(Boolean)
+  const parts = splitDests(raw)
+  if (parts.length === 0) return raw
+  return parts.map(p => (targets.includes(p.toUpperCase()) ? `${p}(팀트럭)` : p)).join(' & ')
+}
+
 // 단일 부킹 요약 문자열
-function bookingLine(b: Booking, teamTruck = false): string {
+function bookingLine(b: Booking, teamTruckDests: string[] = []): string {
   const etd = fmtDate(b.proforma_etd)
   const nos = (b.booking_entries && b.booking_entries.length > 0)
     ? b.booking_entries.map(e => e.no).join(', ')
     : b.booking_no || '-'
   const containers = formatContainers(b)
-  const base = `${b.final_destination || '-'} / ${b.vessel_name || '-'} ${b.voyage || ''} / ${b.carrier || '-'} / (${nos}) / POD: ${b.discharge_port || '-'} / ETD: ${etd} // 수량: (${containers})`
-  return teamTruck ? `${base} // 팀트럭` : base
+  return `${destWithTeamTruck(b, teamTruckDests)} / ${b.vessel_name || '-'} ${b.voyage || ''} / ${b.carrier || '-'} / (${nos}) / POD: ${b.discharge_port || '-'} / ETD: ${etd} // 수량: (${containers})`
 }
 
 function escapeRegex(s: string): string {
@@ -180,7 +190,7 @@ export default function DocCutoffTab({
     // {부킹목록} - 전체 합친 목록 (기존 호환)
     const combinedList = rows.map((b, i) => {
       const prefix = rows.length > 1 ? `${i + 1}. ` : ''
-      return `${prefix}${bookingLine(b, isTeamTruck(b, teamTruckDests))}`
+      return `${prefix}${bookingLine(b, teamTruckDests)}`
     }).join('\n')
 
     let result = template
@@ -191,7 +201,7 @@ export default function DocCutoffTab({
 
     // {부킹목록_N} - N번째 부킹 개별 라인
     for (let i = 0; i < rows.length; i++) {
-      result = result.replace(new RegExp(`\\{부킹목록_${i + 1}\\}`, 'g'), bookingLine(rows[i], isTeamTruck(rows[i], teamTruckDests)))
+      result = result.replace(new RegExp(`\\{부킹목록_${i + 1}\\}`, 'g'), bookingLine(rows[i], teamTruckDests))
     }
     result = result.replace(/\{부킹목록_\d+\}/g, '')
 
@@ -341,7 +351,8 @@ export default function DocCutoffTab({
             <div>
               <h3 className="font-semibold text-sm text-gray-900">팀트럭 도착지</h3>
               <p className="text-xs text-gray-500 mt-0.5">
-                선택한 최종도착지의 부킹은 메일 초안 각 줄 끝에 <b>// 팀트럭</b>이 붙습니다. 나머지는 기존과 동일합니다.
+                선택한 최종도착지는 메일 초안에서 <b>도착지명 뒤에 (팀트럭)</b>으로 표시됩니다.
+                한 줄에 도착지가 여러 개면 해당 도착지에만 붙습니다. 나머지는 기존과 동일합니다.
                 (템플릿에서 <code className="bg-gray-100 px-1 rounded">{'{팀트럭}'}</code> 변수로도 사용 가능)
               </p>
             </div>
@@ -403,10 +414,7 @@ export default function DocCutoffTab({
                       <span className="text-gray-400 w-4 flex-shrink-0 pt-0.5">{i + 1}.</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-medium text-gray-800">{b.final_destination || '-'}</span>
-                          {isTeamTruck(b, teamTruckDests) && (
-                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">팀트럭</span>
-                          )}
+                          <span className="font-medium text-gray-800">{destWithTeamTruck(b, teamTruckDests)}</span>
                           <span className="text-gray-400">/</span>
                           <span className="text-gray-600">{b.vessel_name} {b.voyage}</span>
                           <span className="text-gray-400">/</span>
