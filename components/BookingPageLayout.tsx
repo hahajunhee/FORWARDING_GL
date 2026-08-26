@@ -291,6 +291,7 @@ export default function BookingPageLayout({
                 profiles={profiles}
                 currentUserId={currentUserId}
                 initialTeamTruckDests={teamTruckDests}
+                destinationOptions={destinationOptions}
               />
             </div>
           )}

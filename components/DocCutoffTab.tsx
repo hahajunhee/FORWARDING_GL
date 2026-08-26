@@ -100,10 +100,12 @@ interface Props {
   profiles: Profile[]
   currentUserId: string
   initialTeamTruckDests?: string[]
+  destinationOptions?: string[]   // 설정에 등록된 최종도착지 목록
 }
 
 export default function DocCutoffTab({
-  bookings, initialTemplate, customColumns, profiles, currentUserId, initialTeamTruckDests = [],
+  bookings, initialTemplate, customColumns, profiles, currentUserId,
+  initialTeamTruckDests = [], destinationOptions = [],
 }: Props) {
   const [teamTruckDests, setTeamTruckDests] = useState<string[]>(initialTeamTruckDests)
   const [ttOpen, setTtOpen] = useState(false)
@@ -134,13 +136,15 @@ export default function DocCutoffTab({
     })
   }
 
-  // 부킹장에 존재하는 최종도착지 목록 (팀트럭 선택용)
+  // 팀트럭 선택 후보 — 설정(최종도착지 목록) 기준.
+  // 복수 도착지("A & B")는 개별 도착지 단위로 고를 수 있어야 하므로 조각으로 펼친다.
   const allDestinations = useMemo(() => {
     const s = new Set<string>()
-    for (const b of bookings) if (b.final_destination) s.add(b.final_destination)
+    for (const d of destinationOptions) if (d) s.add(d)
+    for (const b of bookings) splitDests(b.final_destination || '').forEach(d => s.add(d))
     for (const d of teamTruckDests) if (d) s.add(d)
     return [...s].sort((a, b) => a.localeCompare(b, 'ko'))
-  }, [bookings, teamTruckDests])
+  }, [destinationOptions, bookings, teamTruckDests])
 
   const handleSaveTeamTruck = () => {
     setTtSaveState('saving')
