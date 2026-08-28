@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import BookingPageLayout from '@/components/BookingPageLayout'
-import type { Booking, Profile, CustomList, ColumnDefinition, ShanghaiMgmtRow, ScheduleDestGroup } from '@/types'
+import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,9 +22,7 @@ export default async function BookingsPage() {
     { data: baseDescSetting },
     { data: baseColLabelsSetting },
     { data: destSortSetting },
-    { data: shanghaiRows },
     { data: seqRows },
-    { data: prevPortsSetting },
     { data: allocRows },
     { data: closedRows },
     { data: ciRows },
@@ -47,10 +45,8 @@ export default async function BookingsPage() {
     supabase.from('global_settings').select('value').eq('key', 'base_col_descriptions').single(),
     supabase.from('global_settings').select('value').eq('key', 'base_col_labels').single(),
     supabase.from('global_settings').select('value').eq('key', 'destination_sort_order').single(),
-    supabase.from('shanghai_mgmt').select('*').order('sort_order').order('created_at'),
     // seq_no(고유번호)는 별도 조회로 병합 — 마이그레이션 미적용 시에도 부킹장이 깨지지 않도록 방어
     supabase.from('bookings').select('id, seq_no'),
-    supabase.from('global_settings').select('value').eq('key', 'shanghai_prev_ports').single(),
     // alloc_qty(배분수량)도 별도 조회 — 마이그레이션 미적용 시 무시
     supabase.from('bookings').select('id, alloc_qty'),
     // is_closed(마감완료)도 별도 조회 — 마이그레이션 미적용 시 무시
@@ -114,8 +110,6 @@ export default async function BookingsPage() {
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}
       baseColLabels={(baseColLabelsSetting?.value as Record<string, string> | null) || {}}
       destinationSortOrder={(destSortSetting?.value as string[] | null) || []}
-      shanghaiRows={(shanghaiRows || []) as ShanghaiMgmtRow[]}
-      shanghaiPrevPorts={(prevPortsSetting?.value as string[] | null) || []}
     />
   )
 }

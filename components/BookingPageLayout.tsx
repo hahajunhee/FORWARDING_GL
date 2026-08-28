@@ -8,12 +8,11 @@ import ReeferCutoffTab from './ReeferCutoffTab'
 import ScheduleNewTab from './ScheduleNewTab'
 import SplitTab from './SplitTab'
 import SecuredSpaceTab from './SecuredSpaceTab'
-import ShanghaiMgmtTab from './ShanghaiMgmtTab'
 import { signOut } from '@/app/bookings/actions'
-import type { Booking, Profile, CustomList, ColumnDefinition, ShanghaiMgmtRow, ScheduleDestGroup } from '@/types'
+import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS } from '@/types'
 
-type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'shanghai'
+type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured'
 
 interface Props {
   bookings: Booking[]
@@ -28,8 +27,6 @@ interface Props {
   baseColDescriptions: Record<string, string>
   baseColLabels?: Record<string, string>
   destinationSortOrder?: string[]
-  shanghaiRows?: ShanghaiMgmtRow[]
-  shanghaiPrevPorts?: string[]
   scheduleDestGroups?: ScheduleDestGroup[]
   scheduleBlankWeeks?: Record<string, number[]>
   securedBases?: Record<string, { mqc: number; secured: number }>
@@ -103,24 +100,14 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
       </svg>
     ),
   },
-  {
-    key: 'shanghai',
-    label: '상해발관리',
-    sub: '고유번호 집중관리',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-      </svg>
-    ),
-  },
+
 ]
 
 const MASTER_EMAIL = 'hahajunhee@glovis.net'
 
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns,
-  regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [], shanghaiRows = [], shanghaiPrevPorts = [],
+  regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [],
   scheduleDestGroups = [], scheduleBlankWeeks = {}, securedBases = {}, teamTruckDests = [],
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
@@ -335,15 +322,6 @@ export default function BookingPageLayout({
                 destinationOptions={destinationOptions}
                 destinationSortOrder={destinationSortOrder}
               />
-            </div>
-          )}
-          {activeTab === 'shanghai' && (
-            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">상해발관리</h2>
-                <p className="text-sm text-gray-500">부킹장의 고유번호로 집중관리 대상을 추가하고, MPA 주요 PDC 스케줄 현황 보고서를 Excel로 다운로드합니다.</p>
-              </div>
-              <ShanghaiMgmtTab bookings={bookings} initialRows={shanghaiRows} initialPrevPorts={shanghaiPrevPorts} />
             </div>
           )}
         </main>

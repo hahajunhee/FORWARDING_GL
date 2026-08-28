@@ -170,22 +170,6 @@ export async function bulkSaveBookings(
   return { errors }
 }
 
-// ── 상해발관리 직전 PORT 목록 저장 (전체 공유) ──────────────────────
-
-export async function saveShanghaiPrevPorts(ports: string[]): Promise<{ error: string | null }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: '로그인이 필요합니다.' }
-
-  const { error } = await supabase
-    .from('global_settings')
-    .upsert({ key: 'shanghai_prev_ports', value: ports })
-
-  if (error) return { error: error.message }
-  revalidatePath('/bookings')
-  return { error: null }
-}
-
 // ── 주요 스케줄(new) 최종도착지 매핑 저장 (전체 공유) ───────────────
 
 export async function saveScheduleDestGroups(
@@ -364,65 +348,4 @@ export async function signOut() {
   redirect('/login')
 }
 
-// ── 상해발관리 저장 (전체 공유 목록 전체 교체) ─────────────────────
 
-export type ShanghaiRowInput = {
-  booking_seq_no: number | null
-  prev_port: string         // 직전 PORT
-  first_departure: string   // F 최초 출항일
-  current_departure: string // G 현재 출항일
-  berthing: string          // K 접안일
-  mqc: string               // O MQC(/WK)
-  remarks: string           // 비고
-}
-
-export async function saveShanghaiMgmt(
-  rows: ShanghaiRowInput[],
-  securedUpdates: { id: string; secured_space: string }[] = []
-): Promise<{ error: string | null }> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: '로그인이 필요합니다.' }
-
-  // 확보선복 편집분을 부킹 원본에 반영 (부킹장 탭에도 즉시 반영됨)
-  if (securedUpdates.length > 0) {
-    const results = await Promise.all(
-      securedUpdates.map(u => supabase.from('bookings').update({ secured_space: u.secured_space }).eq('id', u.id))
-    )
-    const upErr = results.find(r => r.error)?.error
-    if (upErr) return { error: upErr.message }
-  }
-
-  // 전체 교체 방식: 기존 행 모두 삭제 후 현재 목록 삽입
-  const { error: delErr } = await supabase
-    .from('shanghai_mgmt')
-    .delete()
-    .neq('id', '00000000-0000-0000-0000-000000000000')
-  if (delErr) return { error: delErr.message }
-
-  if (rows.length > 0) {
-    const base = rows.map((r, i) => ({
-      booking_seq_no: r.booking_seq_no,
-      sort_order: i,
-      first_departure: r.first_departure || '',
-      current_departure: r.current_departure || '',
-    }))
-    const withBerthing = base.map((b, i) => ({ ...b, berthing: rows[i].berthing || '' }))
-    const withMqc = withBerthing.map((b, i) => ({ ...b, mqc: rows[i].mqc || '' }))
-    const withAll = withMqc.map((b, i) => ({ ...b, prev_port: rows[i].prev_port || '', remarks: rows[i].remarks || '' }))
-    // 신규 컬럼 미적용 마이그레이션 상태도 안전하게 — 단계적으로 폴백
-    const candidates = [withAll, withMqc, withBerthing, base]
-    let insErr: { message: string } | null = null
-    for (const payload of candidates) {
-      const res = await supabase.from('shanghai_mgmt').insert(payload)
-      insErr = res.error
-      if (!insErr) break
-      // 컬럼 없음 오류가 아니면 즉시 중단
-      if (!/does not exist|berthing|mqc|column/i.test(insErr.message)) break
-    }
-    if (insErr) return { error: insErr.message }
-  }
-
-  revalidatePath('/bookings')
-  return { error: null }
-}

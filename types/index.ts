@@ -113,21 +113,6 @@ export interface BookingFormData {
   remarks: string
 }
 
-export interface ShanghaiMgmtRow {
-  id: string
-  booking_seq_no: number | null
-  sort_order: number
-  prev_port: string         // 직전 PORT (수동)
-  first_departure: string   // F 최초 출항일 (수동)
-  current_departure: string // G 현재 출항일 (수동)
-  berthing: string          // K 접안일 (수동)
-  mqc: string               // O MQC(/WK) (수동, 도착지별 기본값 일괄설정 가능)
-  remarks: string           // 비고 (수동)
-  delay_shanghai: string    // (미사용 — H는 자동계산)
-  delay_busan: string       // (미사용 — L은 자동계산)
-  created_at: string
-  updated_at: string
-}
 
 // 주요 스케줄(new) — 최종도착지 매핑 그룹
 // 서로 다른 최종도착지를 하나의 표시명으로 묶어 병합 표시한다.
@@ -170,10 +155,6 @@ export const DEFAULT_COLUMN_ORDER = [
   'remarks',
   'week_no',
   'is_closed',
-  'ci_qty',
-  'ci_qty_total',
-  'ci_dest',
-  'ci_vessel',
 ]
 
 export const DEFAULT_PINNED_COLUMNS = ['forwarder_handler', 'discharge_port', 'final_destination']
@@ -201,10 +182,6 @@ export const COLUMN_LABELS: Record<string, string> = {
   con_pickup_qty:       '컨픽업수량',
   remarks:              '비고',
   is_closed:            '마감',
-  ci_qty:               'CI_수량',
-  ci_qty_total:         'CI_수량(총합)',
-  ci_dest:              'CI_도착지',
-  ci_vessel:            'CI_모선명',
 }
 
 export const CARRIERS = [
