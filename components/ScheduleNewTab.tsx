@@ -207,6 +207,25 @@ export default function ScheduleNewTab({
     return Array.isArray(saved) ? [...saved].sort((a, b) => a - b) : monthWeeks
   }, [month, blankWeeks, monthWeeks])
 
+  // 도착지별 선사 목록 (조회 월 기준) — 도착지 등록의 선사 후보로 사용
+  const carriersByDest = useMemo(() => {
+    const m: Record<string, Set<string>> = {}
+    for (const r of allRows) {
+      if (month && r.month !== month) continue
+      const c = (r.cells.carrier || '').trim()
+      if (!c || !r.srcDest) continue
+      for (const d of [r.srcDest, ...splitDests(r.srcDest)]) {
+        const k = d.trim().toUpperCase()
+        if (!k) continue
+        if (!m[k]) m[k] = new Set()
+        m[k].add(c)
+      }
+    }
+    const out: Record<string, string[]> = {}
+    for (const [k, v] of Object.entries(m)) out[k] = [...v]
+    return out
+  }, [allRows, month])
+
   // 매핑에 없어 제외된 도착지 (사용자에게 안내)
   const unmappedDests = useMemo(() => {
     const s = new Set<string>()
@@ -691,6 +710,7 @@ export default function ScheduleNewTab({
             ...allRows.map(r => r.cells.carrier),
             ...groups.flatMap(g => g.carriers || []),
           ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))}
+          carriersByDest={carriersByDest}
           onClose={() => setMapOpen(false)}
           onSaved={g => { setGroups(g); setMapOpen(false) }}
         />
@@ -779,10 +799,11 @@ export function BlankWeekModal({ month, defaultWeeks, selected, isCustom, allWee
 
 // ── 도착지 매핑 모달 ────────────────────────────────────────────────
 
-export function DestMappingModal({ groups, allDests, allCarriers = [], onClose, onSaved }: {
+export function DestMappingModal({ groups, allDests, allCarriers = [], carriersByDest, onClose, onSaved }: {
   groups: ScheduleDestGroup[]
   allDests: string[]
   allCarriers?: string[]
+  carriersByDest?: Record<string, string[]>  // 도착지(대문자) → 조회 기간 내 부킹의 선사
   onClose: () => void
   onSaved: (g: ScheduleDestGroup[]) => void
 }) {
@@ -793,7 +814,12 @@ export function DestMappingModal({ groups, allDests, allCarriers = [], onClose, 
   const [isPending, startTransition] = useTransition()
   const [err, setErr] = useState<string | null>(null)
 
-  const used = new Set(draft.flatMap(g => g.members.map(m => m.trim().toUpperCase())))
+  // 같은 도착지를 선사별로 여러 항목에 연결할 수 있으므로 잠그지 않고,
+  // 다른 항목에도 연결돼 있으면 안내만 표시한다.
+  const usedBy = (dest: string, selfIdx: number) => draft
+    .map((g, gi) => ({ g, gi }))
+    .filter(({ g, gi }) => gi !== selfIdx && g.members.some(m => m.trim().toUpperCase() === dest.trim().toUpperCase()))
+    .map(({ g }) => g.label || '(이름 없음)')
 
   const update = (i: number, patch: Partial<ScheduleDestGroup>) =>
     setDraft(p => p.map((g, gi) => gi === i ? { ...g, ...patch } : g))
@@ -832,6 +858,20 @@ export function DestMappingModal({ groups, allDests, allCarriers = [], onClose, 
       if (error) { setErr(error); return }
       onSaved(clean)
     })
+  }
+
+  // 선택한 도착지에 실제로 부킹이 있는 선사만 후보로 (조회 기간 기준)
+  const carrierChoices = (g: ScheduleDestGroup): string[] => {
+    const selected = g.carriers || []
+    if (!carriersByDest || g.members.length === 0) return allCarriers
+    const set = new Set<string>()
+    for (const m of g.members) {
+      for (const d of [m, ...splitDests(m)]) {
+        for (const c of carriersByDest[d.trim().toUpperCase()] || []) set.add(c)
+      }
+    }
+    selected.forEach(c => set.add(c))   // 이미 선택한 선사는 항상 유지
+    return set.size > 0 ? [...set].sort((a, b) => a.localeCompare(b, 'ko')) : allCarriers
   }
 
   const visibleDests = (g: ScheduleDestGroup) => allDests.filter(d =>
@@ -894,18 +934,18 @@ export function DestMappingModal({ groups, allDests, allCarriers = [], onClose, 
                 <div className="flex flex-wrap gap-1.5 mt-1">
                   {visibleDests(g).map(d => {
                     const on = g.members.some(m => m.trim().toUpperCase() === d.trim().toUpperCase())
-                    const takenByOther = !on && used.has(d.trim().toUpperCase())
+                    const others = on ? [] : usedBy(d, i)
                     return (
-                      <button key={d} disabled={takenByOther}
+                      <button key={d}
                         onClick={() => update(i, {
                           members: on ? g.members.filter(m => m.trim().toUpperCase() !== d.trim().toUpperCase()) : [...g.members, d],
                         })}
                         className={`text-[11px] px-2 py-1 rounded border transition-colors ${
                           on ? 'bg-violet-600 text-white border-violet-600'
-                            : takenByOther ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'
+                            : others.length > 0 ? 'bg-white text-slate-400 border-dashed border-slate-300 hover:bg-slate-50'
                             : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                         }`}
-                        title={takenByOther ? '다른 도착지에 이미 연결됨' : undefined}>{d}</button>
+                        title={others.length > 0 ? `${others.join(', ')}에도 연결됨 (선사로 구분하세요)` : undefined}>{d}</button>
                     )
                   })}
                   {visibleDests(g).length === 0 && (
@@ -918,9 +958,12 @@ export function DestMappingModal({ groups, allDests, allCarriers = [], onClose, 
                   연결된 선사 {(g.carriers || []).length > 0
                     ? <span className="text-sky-600 font-bold">{(g.carriers || []).length}개</span>
                     : <span className="text-slate-400">(미선택 = 모든 선사)</span>}
+                  {carriersByDest && g.members.length > 0 && (
+                    <span className="text-slate-300"> · 조회 기간 내 해당 도착지 부킹의 선사</span>
+                  )}
                 </label>
                 <div className="flex flex-wrap gap-1.5 mt-1">
-                  {allCarriers.map(c => {
+                  {carrierChoices(g).map(c => {
                     const on = (g.carriers || []).some(x => x.trim().toUpperCase() === c.trim().toUpperCase())
                     return (
                       <button key={c}
@@ -935,8 +978,8 @@ export function DestMappingModal({ groups, allDests, allCarriers = [], onClose, 
                         }`}>{c}</button>
                     )
                   })}
-                  {allCarriers.length === 0 && (
-                    <span className="text-[11px] text-slate-400">선사 목록이 없습니다.</span>
+                  {carrierChoices(g).length === 0 && (
+                    <span className="text-[11px] text-slate-400">해당 도착지에 부킹이 있는 선사가 없습니다.</span>
                   )}
                   {(g.carriers || []).length > 0 && (
                     <button onClick={() => update(i, { carriers: [] })}

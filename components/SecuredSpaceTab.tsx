@@ -316,6 +316,26 @@ export default function SecuredSpaceTab({
     return Array.isArray(saved) ? [...saved].sort((a, b) => a - b) : monthWeeks
   }, [monthKey, blankWeeks, monthWeeks])
 
+  // 도착지별 선사 목록 (출항기간 내 부킹 기준) — 도착지 등록의 선사 후보로 사용
+  const carriersByDest = useMemo(() => {
+    const m: Record<string, Set<string>> = {}
+    for (const r of allRows) {
+      if (etdFrom && (!r.etdIso || r.etdIso < etdFrom)) continue
+      if (etdTo && (!r.etdIso || r.etdIso > etdTo)) continue
+      const c = (r.cells.carrier || '').trim()
+      if (!c || !r.srcDest) continue
+      for (const d of [r.srcDest, ...splitDests(r.srcDest)]) {
+        const k = d.trim().toUpperCase()
+        if (!k) continue
+        if (!m[k]) m[k] = new Set()
+        m[k].add(c)
+      }
+    }
+    const out: Record<string, string[]> = {}
+    for (const [k, v] of Object.entries(m)) out[k] = [...v]
+    return out
+  }, [allRows, etdFrom, etdTo])
+
   // 매핑에 없어 제외된 도착지 (사용자에게 안내)
   const unmappedDests = useMemo(() => {
     const s = new Set<string>()
@@ -880,6 +900,7 @@ export default function SecuredSpaceTab({
             ...allRows.map(r => r.cells.carrier),
             ...groups.flatMap(g => g.carriers || []),
           ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))}
+          carriersByDest={carriersByDest}
           onClose={() => setMapOpen(false)}
           onSaved={g => { setGroups(g); setMapOpen(false) }}
         />
