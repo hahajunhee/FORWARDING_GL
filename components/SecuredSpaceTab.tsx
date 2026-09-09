@@ -181,8 +181,8 @@ export default function SecuredSpaceTab({
   })
   const [rfOff, setRfOff] = useState(true)
   const [showBlank, setShowBlank] = useState(true)
-  // 주차(BLANK SAILING·주차 열·MQC 배정) 판정 기준 날짜
-  const [weekBase, setWeekBase] = useState<'proforma' | 'updated'>('proforma')
+  // 조회·주차 판정 기준 날짜 (출항기간 필터 + 주차 열 + BLANK SAILING + MQC 배정)
+  const [weekBase, setWeekBase] = useState<'proforma' | 'updated'>('updated')
   const [mapOpen, setMapOpen] = useState(false)
   const [weekCfgOpen, setWeekCfgOpen] = useState(false)
   const [colFilters, setColFilters] = useState<Record<string, string[]>>({})
@@ -206,8 +206,8 @@ export default function SecuredSpaceTab({
 
   // ── 원본 행 ──────────────────────────────────────────────────────
   const allRows = useMemo<SsRow[]>(() => bookings.map(b => {
-    // 주차 판정 기준: PROFORMA ETD 또는 UPDATED ETD(없으면 PROFORMA로 대체)
-    const weekIso = weekBase === 'updated' ? (b.updated_etd || b.proforma_etd) : b.proforma_etd
+    // 조회·주차 기준 날짜: PROFORMA ETD 또는 UPDATED ETD(없으면 PROFORMA로 대체)
+    const weekIso = (weekBase === 'updated' ? (b.updated_etd || b.proforma_etd) : b.proforma_etd) || ''
     const wn = getWeekNum(weekIso)
     return {
     cells: {
@@ -221,11 +221,11 @@ export default function SecuredSpaceTab({
       week: wn !== null ? `${wn}주차` : '',
     },
     srcDest: b.final_destination || '',
-    etdIso: b.proforma_etd || '',
+    etdIso: weekIso,   // 출항기간 필터·정렬 모두 기준 날짜를 따른다
     handlerId: b.forwarder_handler_id || '',
-    month: b.proforma_etd ? b.proforma_etd.slice(0, 7) : '',
+    month: weekIso ? weekIso.slice(0, 7) : '',
     weekNum: wn,
-    weekIso: weekIso || '',
+    weekIso,
     src: b,
   }
   }), [bookings, weekBase])
@@ -423,9 +423,8 @@ export default function SecuredSpaceTab({
           })
         }
       }
-      const sortKey = (r: SsRow) => (weekBase === 'updated' ? (r.weekIso || r.etdIso) : r.etdIso) || '9999'
       rows.sort((a, b) => {
-        const ka = sortKey(a), kb = sortKey(b)
+        const ka = a.etdIso || '9999', kb = b.etdIso || '9999'
         if (ka !== kb) return ka.localeCompare(kb)
         return a.cells.vessel.localeCompare(b.cells.vessel)
       })
@@ -700,7 +699,9 @@ export default function SecuredSpaceTab({
           <span className="text-xs text-slate-400">~</span>
           <input type="date" value={etdTo} onChange={e => setEtdTo(e.target.value)}
             className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white" />
-          <span className="text-[11px] text-slate-400">PROFORMA ETD 기준</span>
+          <span className="text-[11px] text-slate-400">
+            {weekBase === 'updated' ? 'UPDATED ETD' : 'PROFORMA ETD'} 기준
+          </span>
           <button onClick={() => setRfOff(v => !v)}
             className={`text-xs px-3 py-1.5 rounded-lg border font-medium ${rfOff ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
             title="RF(리퍼)로만 구성된 행과 도착지명에 (RF)가 붙은 도착지 제외">RF해제 {rfOff ? 'ON' : 'OFF'}</button>
@@ -709,8 +710,8 @@ export default function SecuredSpaceTab({
             BLANK SAILING 표시
           </label>
           <label className="flex items-center gap-1.5 text-xs text-slate-600 px-2 py-1.5 rounded-lg border border-slate-200 bg-white"
-            title="BLANK SAILING 판정·주차 열·MQC 배정에 쓰는 주차 기준 날짜">
-            주차 기준
+            title="출항기간 조회·주차 열·BLANK SAILING 판정·MQC 배정에 쓰는 기준 날짜">
+            조회 기준
             <select value={weekBase} onChange={e => setWeekBase(e.target.value as 'proforma' | 'updated')}
               className="text-xs border border-slate-200 rounded px-1 py-0.5 bg-white">
               <option value="proforma">PROFORMA ETD</option>
@@ -887,7 +888,7 @@ export default function SecuredSpaceTab({
       <p className="text-xs text-slate-400">
         총 {displayRows.length}행 · 도착지 {new Set(displayRows.map(r => r.groupLabel)).size}개 그룹
         {selRange && ` · 선택 ${selRange.r2 - selRange.r1 + 1}행 × ${selRange.c2 - selRange.c1 + 1}열`}
-        {` · 주차 기준 ${weekBase === 'updated' ? 'UPDATED ETD' : 'PROFORMA ETD'}`}
+        {` · 조회·주차 기준 ${weekBase === 'updated' ? 'UPDATED ETD' : 'PROFORMA ETD'}`}
         {' · MQC는 체크된 주차마다 1개씩 · 마감 지난 행은 확보선복=주당 MQC·실선적물량=컨테이너 수량, 마감 전은 확보선복=컨테이너 수량·실선적물량 공란 · BLANK SAILING은 공란 · 확보선복 < 실선적물량이면 실선적물량 값으로 표시'}
       </p>
 
