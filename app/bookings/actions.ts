@@ -173,7 +173,7 @@ export async function bulkSaveBookings(
 // ── 주요 스케줄(new) 최종도착지 매핑 저장 (전체 공유) ───────────────
 
 export async function saveScheduleDestGroups(
-  groups: { label: string; members: string[] }[]
+  groups: { label: string; members: string[]; carriers?: string[] }[]
 ): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()

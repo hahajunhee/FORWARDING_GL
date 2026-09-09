@@ -10,7 +10,7 @@ import SplitTab from './SplitTab'
 import SecuredSpaceTab from './SecuredSpaceTab'
 import { signOut } from '@/app/bookings/actions'
 import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
-import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS } from '@/types'
+import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS, CARRIERS } from '@/types'
 
 type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured'
 
@@ -119,6 +119,11 @@ export default function BookingPageLayout({
   const destinationOptions = (() => {
     const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
     return c.length > 0 ? c : [...DEFAULT_DESTINATIONS]
+  })()
+  // 설정(선사 목록) 기준 — 도착지 등록의 선사 매핑 후보로 사용
+  const carrierOptions = (() => {
+    const c = customLists.filter(l => l.list_type === 'carrier').map(l => l.name)
+    return c.length > 0 ? c : [...CARRIERS]
   })()
   const docTemplate = currentProfile?.doc_template || null
 
@@ -303,6 +308,7 @@ export default function BookingPageLayout({
                 initialGroups={scheduleDestGroups}
                 initialBlankWeeks={scheduleBlankWeeks}
                 destinationOptions={destinationOptions}
+                carrierOptions={carrierOptions}
                 destinationSortOrder={destinationSortOrder}
               />
             </div>
@@ -320,6 +326,7 @@ export default function BookingPageLayout({
                 initialBlankWeeks={scheduleBlankWeeks}
                 initialBases={securedBases}
                 destinationOptions={destinationOptions}
+                carrierOptions={carrierOptions}
                 destinationSortOrder={destinationSortOrder}
               />
             </div>

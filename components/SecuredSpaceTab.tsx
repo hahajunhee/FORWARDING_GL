@@ -155,12 +155,13 @@ interface Props {
   initialGroups: ScheduleDestGroup[]
   initialBlankWeeks?: Record<string, number[]>
   destinationOptions?: string[]   // 설정에 등록된 최종도착지 목록
+  carrierOptions?: string[]       // 설정에 등록된 선사 목록
   initialBases?: Record<string, BaseSetting>
   destinationSortOrder?: string[]
 }
 
 export default function SecuredSpaceTab({
-  bookings, profiles, initialGroups, initialBlankWeeks = {}, initialBases = {}, destinationOptions = [], destinationSortOrder = [],
+  bookings, profiles, initialGroups, initialBlankWeeks = {}, initialBases = {}, destinationOptions = [], carrierOptions = [], destinationSortOrder = [],
 }: Props) {
   const router = useRouter()
   const [groups, setGroups] = useState<ScheduleDestGroup[]>(initialGroups)
@@ -261,22 +262,31 @@ export default function SecuredSpaceTab({
   //    (여러 곳에 걸치면 각 도착지에 중복으로 표시)
   const labelsOf = useMemo(() => {
     const key = (v: string) => splitDests(v).map(x => x.toUpperCase()).sort().join('|')
-    const map = new Map<string, string>()
-    groups.forEach(g => g.members.forEach(m => {
-      const k = key(m || '')
-      if (k && !map.has(k)) map.set(k, g.label)
+    const entries = groups.map(g => ({
+      label: g.label,
+      wholeKeys: new Set(g.members.map(m => key(m || '')).filter(Boolean)),
+      partKeys: new Set(g.members.flatMap(m => splitDests(m || '').map(p => key(p))).filter(Boolean)),
+      carriers: new Set((g.carriers || []).map(c => (c || '').trim().toUpperCase()).filter(Boolean)),
     }))
-    return (dest: string): string[] => {
+    return (dest: string, carrier = ''): string[] => {
       const raw = (dest || '').trim()
       if (!raw) return []
-      const out: string[] = []
-      const whole = map.get(key(raw))      // 복수 도착지 통째로 등록된 경우
-      if (whole) out.push(whole)
-      for (const p of splitDests(raw)) {   // 구성 도착지별 연결
-        const l = map.get(key(p))
-        if (l && !out.includes(l)) out.push(l)
+      const dk = key(raw)
+      const parts = splitDests(raw).map(p => key(p))
+      const c = (carrier || '').trim().toUpperCase()
+      const specific: string[] = []   // 선사까지 지정된 등록
+      const anyCarrier: string[] = [] // 선사 미지정(전 선사) 등록
+      for (const e of entries) {
+        if (!e.wholeKeys.has(dk) && !parts.some(p => e.partKeys.has(p))) continue
+        if (e.carriers.size > 0) {
+          if (!e.carriers.has(c)) continue
+          if (!specific.includes(e.label)) specific.push(e.label)
+        } else if (!anyCarrier.includes(e.label)) {
+          anyCarrier.push(e.label)
+        }
       }
-      return out
+      // 선사까지 지정된 등록이 있으면 그것을 우선 사용
+      return specific.length > 0 ? specific : anyCarrier
     }
   }, [groups])
 
@@ -309,7 +319,7 @@ export default function SecuredSpaceTab({
   // 매핑에 없어 제외된 도착지 (사용자에게 안내)
   const unmappedDests = useMemo(() => {
     const s = new Set<string>()
-    for (const r of filteredRows) if (r.srcDest && labelsOf(r.srcDest).length === 0) s.add(r.srcDest)
+    for (const r of filteredRows) if (r.srcDest && labelsOf(r.srcDest, r.cells.carrier).length === 0) s.add(r.srcDest)
     return [...s].sort((a, b) => a.localeCompare(b, 'ko'))
   }, [filteredRows, labelsOf])
 
@@ -318,7 +328,7 @@ export default function SecuredSpaceTab({
   const displayRows = useMemo<DisplayRow[]>(() => {
     const byLabel = new Map<string, SsRow[]>()
     for (const r of filteredRows) {
-      for (const label of labelsOf(r.srcDest)) {  // 등록 안 된 도착지는 결과가 비어 자동 제외
+      for (const label of labelsOf(r.srcDest, r.cells.carrier)) {  // 등록 안 된 도착지는 결과가 비어 자동 제외
         if (rfOff && RF_DEST_RE.test(label)) continue
         if (!byLabel.has(label)) byLabel.set(label, [])
         byLabel.get(label)!.push(r)
@@ -454,7 +464,7 @@ export default function SecuredSpaceTab({
     for (const c of COLS) {
       const set = new Set<string>()
       for (const r of baseRows) {
-        if (c.key === 'dest') labelsOf(r.srcDest).forEach(l => set.add(l))
+        if (c.key === 'dest') labelsOf(r.srcDest, r.cells.carrier).forEach(l => set.add(l))
         else set.add(r.cells[c.key] || '')
       }
       m[c.key] = [...set].sort((a, b) => a.localeCompare(b, 'ko'))
@@ -865,6 +875,11 @@ export default function SecuredSpaceTab({
           groups={groups}
           allDests={[...new Set([...destinationOptions, ...groups.flatMap(g => g.members)].filter(Boolean))]
             .sort((a, b) => a.localeCompare(b, 'ko'))}
+          allCarriers={[...new Set([
+            ...carrierOptions,
+            ...allRows.map(r => r.cells.carrier),
+            ...groups.flatMap(g => g.carriers || []),
+          ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))}
           onClose={() => setMapOpen(false)}
           onSaved={g => { setGroups(g); setMapOpen(false) }}
         />

@@ -72,11 +72,12 @@ interface Props {
   initialGroups: ScheduleDestGroup[]
   initialBlankWeeks?: Record<string, number[]>
   destinationOptions?: string[]   // 설정에 등록된 최종도착지 목록
+  carrierOptions?: string[]       // 설정에 등록된 선사 목록
   destinationSortOrder?: string[]
 }
 
 export default function ScheduleNewTab({
-  bookings, profiles, initialGroups, initialBlankWeeks = {}, destinationOptions = [], destinationSortOrder = [],
+  bookings, profiles, initialGroups, initialBlankWeeks = {}, destinationOptions = [], carrierOptions = [], destinationSortOrder = [],
 }: Props) {
   const [groups, setGroups] = useState<ScheduleDestGroup[]>(initialGroups)
   const [blankWeeks, setBlankWeeks] = useState<Record<string, number[]>>(initialBlankWeeks)
@@ -156,22 +157,31 @@ export default function ScheduleNewTab({
   //    (여러 곳에 걸치면 각 도착지에 중복으로 표시)
   const labelsOf = useMemo(() => {
     const key = (v: string) => splitDests(v).map(x => x.toUpperCase()).sort().join('|')
-    const map = new Map<string, string>()
-    groups.forEach(g => g.members.forEach(m => {
-      const k = key(m || '')
-      if (k && !map.has(k)) map.set(k, g.label)
+    const entries = groups.map(g => ({
+      label: g.label,
+      wholeKeys: new Set(g.members.map(m => key(m || '')).filter(Boolean)),
+      partKeys: new Set(g.members.flatMap(m => splitDests(m || '').map(p => key(p))).filter(Boolean)),
+      carriers: new Set((g.carriers || []).map(c => (c || '').trim().toUpperCase()).filter(Boolean)),
     }))
-    return (dest: string): string[] => {
+    return (dest: string, carrier = ''): string[] => {
       const raw = (dest || '').trim()
       if (!raw) return []
-      const out: string[] = []
-      const whole = map.get(key(raw))      // 복수 도착지 통째로 등록된 경우
-      if (whole) out.push(whole)
-      for (const p of splitDests(raw)) {   // 구성 도착지별 연결
-        const l = map.get(key(p))
-        if (l && !out.includes(l)) out.push(l)
+      const dk = key(raw)
+      const parts = splitDests(raw).map(p => key(p))
+      const c = (carrier || '').trim().toUpperCase()
+      const specific: string[] = []   // 선사까지 지정된 등록
+      const anyCarrier: string[] = [] // 선사 미지정(전 선사) 등록
+      for (const e of entries) {
+        if (!e.wholeKeys.has(dk) && !parts.some(p => e.partKeys.has(p))) continue
+        if (e.carriers.size > 0) {
+          if (!e.carriers.has(c)) continue
+          if (!specific.includes(e.label)) specific.push(e.label)
+        } else if (!anyCarrier.includes(e.label)) {
+          anyCarrier.push(e.label)
+        }
       }
-      return out
+      // 선사까지 지정된 등록이 있으면 그것을 우선 사용
+      return specific.length > 0 ? specific : anyCarrier
     }
   }, [groups])
 
@@ -200,7 +210,7 @@ export default function ScheduleNewTab({
   // 매핑에 없어 제외된 도착지 (사용자에게 안내)
   const unmappedDests = useMemo(() => {
     const s = new Set<string>()
-    for (const r of filteredRows) if (r.srcDest && labelsOf(r.srcDest).length === 0) s.add(r.srcDest)
+    for (const r of filteredRows) if (r.srcDest && labelsOf(r.srcDest, r.cells.carrier).length === 0) s.add(r.srcDest)
     return [...s].sort((a, b) => a.localeCompare(b, 'ko'))
   }, [filteredRows, labelsOf])
 
@@ -208,7 +218,7 @@ export default function ScheduleNewTab({
   const displayRows = useMemo<DisplayRow[]>(() => {
     const byLabel = new Map<string, SchedRow[]>()
     for (const r of filteredRows) {
-      for (const label of labelsOf(r.srcDest)) {  // 등록 안 된 도착지는 결과가 비어 자동 제외
+      for (const label of labelsOf(r.srcDest, r.cells.carrier)) {  // 등록 안 된 도착지는 결과가 비어 자동 제외
         if (rfOff && RF_DEST_RE.test(label)) continue
         if (!byLabel.has(label)) byLabel.set(label, [])
         byLabel.get(label)!.push(r)
@@ -291,7 +301,7 @@ export default function ScheduleNewTab({
     for (const c of COLS) {
       const set = new Set<string>()
       for (const r of baseRows) {
-        if (c.key === 'dest') labelsOf(r.srcDest).forEach(l => set.add(l))
+        if (c.key === 'dest') labelsOf(r.srcDest, r.cells.carrier).forEach(l => set.add(l))
         else set.add(r.cells[c.key] || '')
       }
       m[c.key] = [...set].sort((a, b) => a.localeCompare(b, 'ko'))
@@ -676,6 +686,11 @@ export default function ScheduleNewTab({
           groups={groups}
           allDests={[...new Set([...destinationOptions, ...groups.flatMap(g => g.members)].filter(Boolean))]
             .sort((a, b) => a.localeCompare(b, 'ko'))}
+          allCarriers={[...new Set([
+            ...carrierOptions,
+            ...allRows.map(r => r.cells.carrier),
+            ...groups.flatMap(g => g.carriers || []),
+          ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko'))}
           onClose={() => setMapOpen(false)}
           onSaved={g => { setGroups(g); setMapOpen(false) }}
         />
@@ -764,13 +779,15 @@ export function BlankWeekModal({ month, defaultWeeks, selected, isCustom, allWee
 
 // ── 도착지 매핑 모달 ────────────────────────────────────────────────
 
-export function DestMappingModal({ groups, allDests, onClose, onSaved }: {
+export function DestMappingModal({ groups, allDests, allCarriers = [], onClose, onSaved }: {
   groups: ScheduleDestGroup[]
   allDests: string[]
+  allCarriers?: string[]
   onClose: () => void
   onSaved: (g: ScheduleDestGroup[]) => void
 }) {
-  const [draft, setDraft] = useState<ScheduleDestGroup[]>(groups.map(g => ({ ...g, members: [...g.members] })))
+  const [draft, setDraft] = useState<ScheduleDestGroup[]>(
+    groups.map(g => ({ ...g, members: [...g.members], carriers: [...(g.carriers || [])] })))
   const [newName, setNewName] = useState('')
   const [search, setSearch] = useState('')
   const [isPending, startTransition] = useTransition()
@@ -797,13 +814,17 @@ export function DestMappingModal({ groups, allDests, onClose, onSaved }: {
       return
     }
     setErr(null)
-    setDraft(p => [...p, { label: name, members: [] }])
+    setDraft(p => [...p, { label: name, members: [], carriers: [] }])
     setNewName('')
   }
 
   const save = () => {
     const clean = draft
-      .map(g => ({ label: g.label.trim(), members: g.members.map(m => m.trim()).filter(Boolean) }))
+      .map(g => ({
+        label: g.label.trim(),
+        members: g.members.map(m => m.trim()).filter(Boolean),
+        carriers: (g.carriers || []).map(c => c.trim()).filter(Boolean),
+      }))
       .filter(g => g.label)
     setErr(null)
     startTransition(async () => {
@@ -823,7 +844,8 @@ export function DestMappingModal({ groups, allDests, onClose, onSaved }: {
         <div className="px-5 py-3 border-b border-slate-200">
           <h3 className="font-bold text-slate-900">도착지 등록</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            여기에 등록한 도착지만 조회됩니다. 도착지명을 만들고, 그 아래에서 부킹장의 최종도착지를 연결하세요.
+            여기에 등록한 도착지만 조회됩니다. 도착지명을 만들고, 부킹장의 <b>최종도착지</b>와 <b>선사</b>를 연결하세요.
+            둘 다 여러 개 선택할 수 있고, 선사를 비워두면 <b>모든 선사</b>가 대상입니다.
             복수 도착지(&quot;A &amp; B&quot;)도 하나의 항목으로 연결할 수 있습니다.
           </p>
         </div>
@@ -888,6 +910,39 @@ export function DestMappingModal({ groups, allDests, onClose, onSaved }: {
                   })}
                   {visibleDests(g).length === 0 && (
                     <span className="text-[11px] text-slate-400">검색 결과가 없습니다.</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 font-medium">
+                  연결된 선사 {(g.carriers || []).length > 0
+                    ? <span className="text-sky-600 font-bold">{(g.carriers || []).length}개</span>
+                    : <span className="text-slate-400">(미선택 = 모든 선사)</span>}
+                </label>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {allCarriers.map(c => {
+                    const on = (g.carriers || []).some(x => x.trim().toUpperCase() === c.trim().toUpperCase())
+                    return (
+                      <button key={c}
+                        onClick={() => update(i, {
+                          carriers: on
+                            ? (g.carriers || []).filter(x => x.trim().toUpperCase() !== c.trim().toUpperCase())
+                            : [...(g.carriers || []), c],
+                        })}
+                        className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+                          on ? 'bg-sky-600 text-white border-sky-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                        }`}>{c}</button>
+                    )
+                  })}
+                  {allCarriers.length === 0 && (
+                    <span className="text-[11px] text-slate-400">선사 목록이 없습니다.</span>
+                  )}
+                  {(g.carriers || []).length > 0 && (
+                    <button onClick={() => update(i, { carriers: [] })}
+                      className="text-[11px] px-2 py-1 rounded border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100">
+                      선사 전체 해제
+                    </button>
                   )}
                 </div>
               </div>

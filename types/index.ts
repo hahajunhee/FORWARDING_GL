@@ -119,6 +119,7 @@ export interface BookingFormData {
 export interface ScheduleDestGroup {
   label: string      // 표시명 (줄바꿈 가능: "ONTARIO(LA)\nJEFFERSON(LA)")
   members: string[]  // 포함되는 최종도착지 원본값
+  carriers?: string[] // 함께 매핑되는 선사 (비어 있으면 모든 선사 대상)
 }
 
 export interface CustomList {
