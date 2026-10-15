@@ -8,11 +8,12 @@ import ReeferCutoffTab from './ReeferCutoffTab'
 import ScheduleNewTab from './ScheduleNewTab'
 import SplitTab from './SplitTab'
 import SecuredSpaceTab from './SecuredSpaceTab'
+import CutoffEtdTab from './CutoffEtdTab'
 import { signOut } from '@/app/bookings/actions'
 import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS, CARRIERS } from '@/types'
 
-type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured'
+type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'cutoff_etd'
 
 interface Props {
   bookings: Booking[]
@@ -31,6 +32,7 @@ interface Props {
   scheduleBlankWeeks?: Record<string, number[]>
   securedBases?: Record<string, { mqc: number; secured: number }>
   teamTruckDests?: string[]
+  etaTransitDays?: Record<string, number>
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -79,6 +81,17 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
     ),
   },
   {
+    key: 'cutoff_etd',
+    label: '마감·ETD 관리',
+    sub: '미마감·ETD 일괄수정',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+      </svg>
+    ),
+  },
+  {
     key: 'schedule_new',
     label: '주요 스케줄(new)',
     sub: '고객사 송부 양식',
@@ -108,7 +121,7 @@ const MASTER_EMAIL = 'hahajunhee@glovis.net'
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns,
   regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [],
-  scheduleDestGroups = [], scheduleBlankWeeks = {}, securedBases = {}, teamTruckDests = [],
+  scheduleDestGroups = [], scheduleBlankWeeks = {}, securedBases = {}, teamTruckDests = [], etaTransitDays = {},
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -258,6 +271,7 @@ export default function BookingPageLayout({
                 baseColLabels={baseColLabels}
                 destinationSortOrder={destinationSortOrder}
                 tableStyle={currentProfile?.table_style || DEFAULT_TABLE_STYLE}
+                etaTransitDays={etaTransitDays}
               />
             </div>
           )}
@@ -294,6 +308,21 @@ export default function BookingPageLayout({
                 <p className="text-sm text-gray-500">부킹번호를 입력하면 부킹 정보를 조회하여 메일용 테이블을 생성합니다.</p>
               </div>
               <ReeferCutoffTab bookings={bookings} />
+            </div>
+          )}
+          {activeTab === 'cutoff_etd' && (
+            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">마감·ETD 관리</h2>
+                <p className="text-sm text-gray-500">미마감 부킹의 서류마감일과 UPDATED ETD를 한 화면에서 수정합니다. 저장하면 부킹장에 반영됩니다.</p>
+              </div>
+              <CutoffEtdTab
+                bookings={bookings}
+                profiles={profiles}
+                currentUserId={currentUserId}
+                customColumns={customColumns}
+                etaTransitDays={etaTransitDays}
+              />
             </div>
           )}
           {activeTab === 'schedule_new' && (

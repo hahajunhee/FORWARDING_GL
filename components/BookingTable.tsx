@@ -8,6 +8,9 @@ import { ko } from 'date-fns/locale'
 import type { Booking, Profile, CustomList, ColumnDefinition, BookingEntry, TableStyle } from '@/types'
 import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, CARRIERS, MAJOR_PORTS, DEFAULT_DESTINATIONS, DEFAULT_TABLE_STYLE } from '@/types'
 import { deleteBooking, saveColumnOrder, bulkSaveBookings, bulkDeleteBookings } from '@/app/bookings/actions'
+import type { TransitMap } from '@/lib/eta'
+import { calcEta } from '@/lib/eta'
+import EtaTransitModal from './EtaTransitModal'
 
 // ── BLANK SAILING / 주차 헬퍼 ───────────────────────────────────
 const WEEK1_START = new Date('2025-12-29') // 1주차 기준일(월요일)
@@ -951,14 +954,20 @@ function AutocompleteInput({ value, options, onChange, placeholder, className, a
 
 // ── 편집 셀 ───────────────────────────────────────────────────────
 
-function EditCell({ colKey, row, profiles, destinations, ports, carriers, customColumns, onChange, autoFocus }: {
+function EditCell({ colKey, row, profiles, destinations, ports, carriers, customColumns, onChange, autoFocus, transitDays }: {
   colKey: string; row: Partial<Booking>; profiles: Profile[]
   destinations: string[]; ports: string[]; carriers: string[]
   customColumns: ColumnDefinition[]
   onChange: (c: Partial<Booking>) => void
   autoFocus?: boolean
+  transitDays?: TransitMap
 }) {
   const cls = "w-full h-full border-0 px-1.5 py-1 text-xs bg-transparent focus:outline-none"
+  // UPDATED ETD 변경 → 선사·양하항 규칙에 맞춰 ETA 자동 계산 (규칙 없으면 ETA 유지)
+  const withEta = (updated: string | null): Partial<Booking> => {
+    const eta = calcEta(updated, row.carrier, row.discharge_port, transitDays)
+    return eta ? { updated_etd: updated, eta } : { updated_etd: updated }
+  }
   switch (colKey) {
     case 'seq_no':
       return <span className="text-xs font-mono text-gray-400 italic px-1.5">{row.seq_no ?? '자동'}</span>
@@ -1007,9 +1016,14 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
     case 'doc_cutoff_date':
       return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.doc_cutoff_date || ''} onChange={e => onChange({ doc_cutoff_date: e.target.value || null })} onBlur={e => onChange({ doc_cutoff_date: normalizeDateInput(e.target.value) })} />
     case 'proforma_etd':
-      return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.proforma_etd || ''} onChange={e => onChange({ proforma_etd: e.target.value || null })} onBlur={e => onChange({ proforma_etd: normalizeDateInput(e.target.value) })} />
+      // PROFORMA ETD를 입력하면 UPDATED ETD도 같은 값으로 채운다 (ETA까지 연쇄 계산)
+      return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.proforma_etd || ''}
+        onChange={e => { const v = e.target.value || null; onChange({ proforma_etd: v, ...withEta(v) }) }}
+        onBlur={e => { const v = normalizeDateInput(e.target.value); onChange({ proforma_etd: v, ...withEta(v) }) }} />
     case 'updated_etd':
-      return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.updated_etd || ''} onChange={e => onChange({ updated_etd: e.target.value || null })} onBlur={e => onChange({ updated_etd: normalizeDateInput(e.target.value) })} />
+      return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.updated_etd || ''}
+        onChange={e => onChange(withEta(e.target.value || null))}
+        onBlur={e => onChange(withEta(normalizeDateInput(e.target.value)))} />
     case 'eta':
       return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.eta || ''} onChange={e => onChange({ eta: e.target.value || null })} onBlur={e => onChange({ eta: normalizeDateInput(e.target.value) })} />
     case 'handler_region':
@@ -1203,6 +1217,7 @@ interface Props {
   baseColLabels?: Record<string, string>
   destinationSortOrder?: string[]
   tableStyle?: TableStyle
+  etaTransitDays?: TransitMap
   onSettingsClick?: () => void
 }
 
@@ -1216,9 +1231,13 @@ export default function BookingTable({
   baseColLabels = {},
   destinationSortOrder = [],
   tableStyle = DEFAULT_TABLE_STYLE,
+  etaTransitDays = {},
   onSettingsClick,
 }: Props) {
   const router = useRouter()
+  // ETA 자동계산 규칙 (선사+양하항별 운송일수)
+  const [transitDays, setTransitDays] = useState<TransitMap>(etaTransitDays)
+  const [etaCfgOpen, setEtaCfgOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   // 모바일(768px 미만)에서는 틀고정(sticky 열) 해제 — 좁은 화면에서 표가 잘 보이도록
@@ -2453,7 +2472,7 @@ export default function BookingTable({
               }}>
               <div style={colWidths[col] ? { width: Math.max(16, colWidths[col] - 18), overflow: 'hidden' } : undefined}>
               {canEditCell
-                ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} />
+                ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} transitDays={transitDays} />
                 : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} />
               }
               {col === 'booking_no' && !canEditCell && groupMap[booking.id] && (
@@ -2488,7 +2507,7 @@ export default function BookingTable({
           return (
             <td key={col} className={`table-td text-xs ${isPinned ? 'sticky z-10' : ''}`}
               style={{ ...(colWidths[col] ? { width: colWidths[col], minWidth: colWidths[col], maxWidth: colWidths[col] } : { minWidth: def.minW }), ...(fixedLeft !== null ? { left: fixedLeft } : {}), ...(isPinned ? { backgroundColor: '#f5f3ff' } : {}), ...newRowBorder }}>
-              <EditCell colKey={col} row={row as unknown as Partial<Booking>} profiles={profiles}
+              <EditCell colKey={col} row={row as unknown as Partial<Booking>} profiles={profiles} transitDays={transitDays}
                 destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns}
                 onChange={c => handleNewRowChange(row.tempId, c as Partial<Booking>)} />
             </td>
@@ -2841,6 +2860,11 @@ export default function BookingTable({
             className="text-xs px-2 py-0.5 bg-gray-100 text-gray-400 border border-gray-200 rounded hover:bg-gray-200 transition-colors">
             열 너비 초기화
           </button>
+          <button onClick={() => setEtaCfgOpen(true)}
+            className="text-xs px-2 py-0.5 bg-cyan-50 text-cyan-700 border border-cyan-200 rounded hover:bg-cyan-100 transition-colors"
+            title="UPDATED ETD 변경 시 ETA를 자동 계산하는 선사·양하항별 운송일수">
+            ETA 자동계산 ({Object.keys(transitDays).length})
+          </button>
           <label className={`flex items-center gap-1 text-xs px-2 py-0.5 border rounded cursor-pointer transition-colors ${copyWithHeaders ? 'bg-indigo-100 text-indigo-700 border-indigo-300' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
             title="드래그 복사 시 열 제목 포함">
             <input type="checkbox" checked={copyWithHeaders} onChange={e => setCopyWithHeaders(e.target.checked)}
@@ -3088,6 +3112,18 @@ export default function BookingTable({
           />
         )
       })()}
+
+      {/* ETA 자동계산 설정 */}
+      {etaCfgOpen && (
+        <EtaTransitModal
+          bookings={bookings}
+          initial={transitDays}
+          carriers={carriers}
+          ports={ports}
+          onClose={() => setEtaCfgOpen(false)}
+          onSaved={next => { setTransitDays(next); setEtaCfgOpen(false) }}
+        />
+      )}
     </div>
   )
 }

@@ -188,6 +188,24 @@ export async function saveScheduleDestGroups(
   return { error: null }
 }
 
+// ── ETA 자동계산: 선사+양하항별 운송일수 저장 (전체 공유) ───────────
+
+export async function saveEtaTransitDays(
+  map: Record<string, number>
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'eta_transit_days', value: map })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 // ── 서류마감: 팀트럭 대상 최종도착지 저장 (전체 공유) ────────────────
 
 export async function saveTeamTruckDests(dests: string[]): Promise<{ error: string | null }> {

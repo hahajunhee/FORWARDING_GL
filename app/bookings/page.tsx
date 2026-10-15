@@ -30,6 +30,7 @@ export default async function BookingsPage() {
     { data: etdHistRows },
     { data: securedBaseSetting },
     { data: teamTruckSetting },
+    { data: etaTransitSetting },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -58,6 +59,7 @@ export default async function BookingsPage() {
     supabase.from('bookings').select('id, etd_history'),
     supabase.from('global_settings').select('value').eq('key', 'secured_base_settings').single(),
     supabase.from('global_settings').select('value').eq('key', 'team_truck_dests').single(),
+    supabase.from('global_settings').select('value').eq('key', 'eta_transit_days').single(),
   ])
 
   // seq_no·alloc_qty 병합 (컬럼 없거나 오류 시 무시)
@@ -105,6 +107,7 @@ export default async function BookingsPage() {
       scheduleBlankWeeks={(blankWeekSetting?.value as Record<string, number[]> | null) || {}}
       securedBases={(securedBaseSetting?.value as Record<string, { mqc: number; secured: number }> | null) || {}}
       teamTruckDests={(teamTruckSetting?.value as string[] | null) || []}
+      etaTransitDays={(etaTransitSetting?.value as Record<string, number> | null) || {}}
       regionList={(regionSetting?.value as string[] | null) || []}
       customerList={(customerSetting?.value as string[] | null) || []}
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}
