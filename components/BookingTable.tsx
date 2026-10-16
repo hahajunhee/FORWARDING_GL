@@ -10,6 +10,7 @@ import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, CARRIERS, MAJOR_PORTS, DE
 import { deleteBooking, saveColumnOrder, bulkSaveBookings, bulkDeleteBookings } from '@/app/bookings/actions'
 import type { TransitMap } from '@/lib/eta'
 import { calcEta } from '@/lib/eta'
+import { dayInfo } from '@/lib/holidays'
 import EtaTransitModal from './EtaTransitModal'
 
 // ── BLANK SAILING / 주차 헬퍼 ───────────────────────────────────
@@ -1013,8 +1014,28 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
       return <select autoFocus={autoFocus} className={cls} value={row.forwarder_handler_id || ''} onChange={e => onChange({ forwarder_handler_id: e.target.value || null })}>
         <option value="">미지정</option>{profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
       </select>
-    case 'doc_cutoff_date':
-      return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.doc_cutoff_date || ''} onChange={e => onChange({ doc_cutoff_date: e.target.value || null })} onBlur={e => onChange({ doc_cutoff_date: normalizeDateInput(e.target.value) })} />
+    case 'doc_cutoff_date': {
+      // 입력하는 즉시 요일을 보여주고, 주말·공휴일이면 빨갛게 경고
+      const di = dayInfo(normalizeDateInput(row.doc_cutoff_date || ''))
+      const warn = !!di && (di.isWeekend || !!di.holiday)
+      return (
+        <div className="flex items-center gap-1 w-full">
+          <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD"
+            className={`${cls} flex-1 min-w-0`} value={row.doc_cutoff_date || ''}
+            onChange={e => onChange({ doc_cutoff_date: e.target.value || null })}
+            onBlur={e => onChange({ doc_cutoff_date: normalizeDateInput(e.target.value) })} />
+          {di && (
+            <span
+              className={`flex-shrink-0 text-[10px] leading-none px-1 py-0.5 rounded font-bold ${
+                warn ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'
+              }`}
+              title={di.holiday ? `${di.holiday} — 마감일을 다시 확인하세요` : di.isWeekend ? '주말 — 마감일을 다시 확인하세요' : ''}>
+              {di.label}{di.holiday ? '·휴' : ''}
+            </span>
+          )}
+        </div>
+      )
+    }
     case 'proforma_etd':
       // PROFORMA ETD를 입력하면 UPDATED ETD도 같은 값으로 채운다 (ETA까지 연쇄 계산)
       return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.proforma_etd || ''}

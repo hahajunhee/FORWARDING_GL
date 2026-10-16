@@ -6,14 +6,13 @@ import BookingTable from './BookingTable'
 import DocCutoffTab from './DocCutoffTab'
 import ReeferCutoffTab from './ReeferCutoffTab'
 import ScheduleNewTab from './ScheduleNewTab'
-import SplitTab from './SplitTab'
 import SecuredSpaceTab from './SecuredSpaceTab'
 import CutoffEtdTab from './CutoffEtdTab'
 import { signOut } from '@/app/bookings/actions'
 import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS, CARRIERS } from '@/types'
 
-type Tab = 'bookings' | 'split' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'cutoff_etd'
+type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'cutoff_etd'
 
 interface Props {
   bookings: Booking[]
@@ -44,17 +43,6 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'split',
-    label: '스플릿',
-    sub: 'CI_도착지 분할',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M7 4v6a2 2 0 002 2h6a2 2 0 012 2v6M7 4H4m3 0h3m7 16h3m-3 0h-3M4 12h9" />
       </svg>
     ),
   },
@@ -273,15 +261,6 @@ export default function BookingPageLayout({
                 tableStyle={currentProfile?.table_style || DEFAULT_TABLE_STYLE}
                 etaTransitDays={etaTransitDays}
               />
-            </div>
-          )}
-          {activeTab === 'split' && (
-            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">스플릿</h2>
-                <p className="text-sm text-gray-500">C/I가 입력된 부킹을 CI_도착지 값 기준으로 행을 나눕니다. 쪼개기 전후를 확인하고 승인하면 부킹장에 반영됩니다.</p>
-              </div>
-              <SplitTab bookings={bookings} profiles={profiles} customLists={customLists} />
             </div>
           )}
           {activeTab === 'doc_cutoff' && (
