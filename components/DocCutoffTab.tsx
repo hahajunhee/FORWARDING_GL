@@ -6,7 +6,7 @@ import { ko } from 'date-fns/locale'
 import type { Booking, Profile, ColumnDefinition } from '@/types'
 import { COLUMN_LABELS } from '@/types'
 import { saveDocTemplate } from '@/app/settings/actions'
-import { saveTeamTruckDests } from '@/app/bookings/actions'
+import { saveTeamTruckDests, saveRailDests } from '@/app/bookings/actions'
 import { formatContainers, splitDests } from '@/components/BookingTable'
 
 const DEFAULT_TEMPLATE = `{담당자}님,
@@ -46,14 +46,40 @@ function destWithTeamTruck(b: Booking, dests: string[]): string {
   return parts.map(p => (targets.includes(p.toUpperCase()) ? `${p}(팀트럭)` : p)).join(' & ')
 }
 
-// 단일 부킹 요약 문자열
-function bookingLine(b: Booking, teamTruckDests: string[] = []): string {
+// 레일 구간으로 등록된 도착지는 별도 줄로 분리한다.
+// 예: 레일에 AURORA, IL 등록 → "AURORA, IL" 한 줄 + 나머지 도착지 한 줄
+function destLinesOf(b: Booking, teamTruckDests: string[], railDests: string[]): string[] {
+  const raw = (b.final_destination || '').trim()
+  const mark = (d: string) => {
+    const tt = teamTruckDests.map(x => (x || '').trim().toUpperCase()).filter(Boolean)
+    return tt.includes(d.trim().toUpperCase()) ? `${d}(팀트럭)` : d
+  }
+  const parts = splitDests(raw)
+  if (parts.length === 0) return [raw || '-']
+  const rail = railDests.map(x => (x || '').trim().toUpperCase()).filter(Boolean)
+  const isRail = (d: string) => rail.includes(d.trim().toUpperCase())
+
+  const entries: { pos: number; text: string }[] = []
+  const rest: string[] = []
+  let restPos = -1
+  parts.forEach((p, i) => {
+    if (isRail(p)) entries.push({ pos: i, text: mark(p) })
+    else { if (restPos < 0) restPos = i; rest.push(mark(p)) }
+  })
+  if (rest.length > 0) entries.push({ pos: restPos, text: rest.join(' & ') })
+  entries.sort((a, b2) => a.pos - b2.pos)
+  return entries.map(e => e.text)
+}
+
+// 단일 부킹 요약 문자열 (도착지 표기는 호출부에서 지정)
+function bookingLine(b: Booking, teamTruckDests: string[] = [], destText?: string): string {
   const etd = fmtDate(b.proforma_etd)
   const nos = (b.booking_entries && b.booking_entries.length > 0)
     ? b.booking_entries.map(e => e.no).join(', ')
     : b.booking_no || '-'
   const containers = formatContainers(b)
-  return `${destWithTeamTruck(b, teamTruckDests)} / ${b.vessel_name || '-'} ${b.voyage || ''} / ${b.carrier || '-'} / (${nos}) / POD: ${b.discharge_port || '-'} / ETD: ${etd} // 수량: (${containers})`
+  const dest = destText ?? destWithTeamTruck(b, teamTruckDests)
+  return `${dest} / ${b.vessel_name || '-'} ${b.voyage || ''} / ${b.carrier || '-'} / (${nos}) / POD: ${b.discharge_port || '-'} / ETD: ${etd} // 수량: (${containers})`
 }
 
 function escapeRegex(s: string): string {
@@ -100,16 +126,20 @@ interface Props {
   profiles: Profile[]
   currentUserId: string
   initialTeamTruckDests?: string[]
+  initialRailDests?: string[]
   destinationOptions?: string[]   // 설정에 등록된 최종도착지 목록
 }
 
 export default function DocCutoffTab({
   bookings, initialTemplate, customColumns, profiles, currentUserId,
-  initialTeamTruckDests = [], destinationOptions = [],
+  initialTeamTruckDests = [], initialRailDests = [], destinationOptions = [],
 }: Props) {
   const [teamTruckDests, setTeamTruckDests] = useState<string[]>(initialTeamTruckDests)
   const [ttOpen, setTtOpen] = useState(false)
   const [ttSaveState, setTtSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [railDests, setRailDests] = useState<string[]>(initialRailDests)
+  const [railOpen, setRailOpen] = useState(false)
+  const [railSaveState, setRailSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [handlerFilter, setHandlerFilter] = useState<string>(currentUserId)
   const [template, setTemplate] = useState(initialTemplate || DEFAULT_TEMPLATE)
@@ -145,6 +175,16 @@ export default function DocCutoffTab({
     for (const d of teamTruckDests) if (d) s.add(d)
     return [...s].sort((a, b) => a.localeCompare(b, 'ko'))
   }, [destinationOptions, bookings, teamTruckDests])
+
+  const handleSaveRail = () => {
+    setRailSaveState('saving')
+    startTransition(async () => {
+      const { error } = await saveRailDests(railDests)
+      if (error) { setRailSaveState('error'); return }
+      setRailSaveState('saved')
+      setTimeout(() => setRailSaveState('idle'), 2500)
+    })
+  }
 
   const handleSaveTeamTruck = () => {
     setTtSaveState('saving')
@@ -191,27 +231,31 @@ export default function DocCutoffTab({
     let dateStr = selectedDate
     try { dateStr = format(parseISO(selectedDate), 'yyyy년 M월 d일 (E)', { locale: ko }) } catch {}
 
-    // {부킹목록} - 전체 합친 목록 (기존 호환)
-    const combinedList = rows.map((b, i) => {
-      const prefix = rows.length > 1 ? `${i + 1}. ` : ''
-      return `${prefix}${bookingLine(b, teamTruckDests)}`
-    }).join('\n')
+    // 레일 구간이 등록된 도착지는 별도 번호로 분리 (부킹 정보는 동일하게 사용)
+    const expanded = rows.flatMap(b =>
+      destLinesOf(b, teamTruckDests, railDests).map(destText => ({ b, destText })))
+
+    // {부킹목록} - 전체 합친 목록
+    const combinedList = expanded.map((x, i) => {
+      const prefix = expanded.length > 1 ? `${i + 1}. ` : ''
+      return `${prefix}${bookingLine(x.b, teamTruckDests, x.destText)}`
+    }).join(String.fromCharCode(10))
 
     let result = template
       .replace(/{담당자}/g, handler)
       .replace(/{날짜}/g, dateStr)
       .replace(/{부킹목록}/g, combinedList)
-      .replace(/{부킹수}/g, String(rows.length))
+      .replace(/{부킹수}/g, String(expanded.length))
 
     // {부킹목록_N} - N번째 부킹 개별 라인
-    for (let i = 0; i < rows.length; i++) {
-      result = result.replace(new RegExp(`\\{부킹목록_${i + 1}\\}`, 'g'), bookingLine(rows[i], teamTruckDests))
+    for (let i = 0; i < expanded.length; i++) {
+      result = result.replace(new RegExp('\\{부킹목록_' + (i + 1) + '\\}', 'g'), bookingLine(expanded[i].b, teamTruckDests, expanded[i].destText))
     }
     result = result.replace(/\{부킹목록_\d+\}/g, '')
 
     // {부킹번호_N_M} - N번째 부킹의 M번째 booking_entry 번호
     result = result.replace(/\{부킹번호_(\d+)_(\d+)\}/g, (_, n, m) => {
-      const row = rows[parseInt(n) - 1]
+      const row = expanded[parseInt(n) - 1]?.b
       if (!row) return ''
       const entryIdx = parseInt(m) - 1
       if (row.booking_entries && row.booking_entries[entryIdx]) return row.booking_entries[entryIdx].no
@@ -221,7 +265,7 @@ export default function DocCutoffTab({
 
     // {컨테이너_N_M} - N번째 부킹의 M번째 booking_entry 컨테이너
     result = result.replace(/\{컨테이너_(\d+)_(\d+)\}/g, (_, n, m) => {
-      const row = rows[parseInt(n) - 1]
+      const row = expanded[parseInt(n) - 1]?.b
       if (!row) return ''
       const entryIdx = parseInt(m) - 1
       if (row.booking_entries && row.booking_entries[entryIdx]) {
@@ -235,14 +279,14 @@ export default function DocCutoffTab({
     for (const fv of fieldVariables) {
       const escapedLabel = escapeRegex(fv.label)
       // {label_N} 치환
-      for (let i = 0; i < rows.length; i++) {
-        const valN = getFieldValue(rows[i], fv.key, customColumns, teamTruckDests)
+      for (let i = 0; i < expanded.length; i++) {
+        const valN = getFieldValue(expanded[i].b, fv.key, customColumns, teamTruckDests)
         result = result.replace(new RegExp(`\\{${escapedLabel}_${i + 1}\\}`, 'g'), valN)
       }
       // 사용되지 않은 {label_N} 제거
       result = result.replace(new RegExp(`\\{${escapedLabel}_\\d+\\}`, 'g'), '')
       // {label} → 첫 번째 행 값
-      const val = rows.length > 0 ? getFieldValue(rows[0], fv.key, customColumns, teamTruckDests) : ''
+      const val = expanded.length > 0 ? getFieldValue(expanded[0].b, fv.key, customColumns, teamTruckDests) : ''
       result = result.replace(new RegExp(`\\{${escapedLabel}\\}`, 'g'), val)
     }
 
@@ -339,6 +383,19 @@ export default function DocCutoffTab({
             </button>
           </div>
 
+          <div>
+            <label className="text-xs text-gray-500 block mb-1 font-medium">레일 구간</label>
+            <button onClick={() => setRailOpen(v => !v)}
+              className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${
+                railDests.length > 0
+                  ? 'bg-sky-50 text-sky-800 border-sky-300 font-medium'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+              title="레일 구간으로 등록한 최종도착지는 메일 초안에서 별도 번호로 분리됩니다">
+              레일 설정 ({railDests.length})
+            </button>
+          </div>
+
           <div className="ml-auto text-sm">
             {filtered.length > 0
               ? <span className="text-red-600 font-semibold">{filtered.length}건 {handlerFilter ? '(필터)' : ''} / 전체 {totalForDate}건</span>
@@ -390,6 +447,48 @@ export default function DocCutoffTab({
         </div>
       )}
 
+      {/* 레일 구간 선택 */}
+      {railOpen && (
+        <div className="bg-white rounded-xl border border-sky-200 p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-sm text-gray-900">레일 구간 도착지</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                선택한 도착지가 포함된 부킹은 메일 초안에서 <b>별도 번호로 분리</b>됩니다.
+                (예: 레일에 AURORA, IL 등록 → <code className="bg-gray-100 px-1 rounded">2. AURORA, IL …</code> /
+                <code className="bg-gray-100 px-1 rounded">3. 나머지 도착지 …</code> — 부킹 정보는 동일)
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {railSaveState === 'saved' && <span className="text-xs text-green-600 font-medium">✓ 저장됨</span>}
+              {railSaveState === 'error' && <span className="text-xs text-red-600">저장 실패</span>}
+              <button onClick={handleSaveRail} disabled={isPending}
+                className="text-xs px-3 py-1.5 bg-sky-600 text-white rounded-lg hover:bg-sky-700 disabled:opacity-50">
+                {railSaveState === 'saving' ? '저장 중...' : '저장'}
+              </button>
+              <button onClick={() => setRailOpen(false)}
+                className="text-xs px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200">닫기</button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {allDestinations.map(d => {
+              const on = railDests.some(x => x.trim().toUpperCase() === d.trim().toUpperCase())
+              return (
+                <button key={d}
+                  onClick={() => setRailDests(prev => on
+                    ? prev.filter(x => x.trim().toUpperCase() !== d.trim().toUpperCase())
+                    : [...prev, d])}
+                  className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                    on ? 'bg-sky-500 text-white border-sky-500 font-medium'
+                       : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  }`}>{d}</button>
+              )
+            })}
+            {allDestinations.length === 0 && <span className="text-xs text-gray-400">등록된 최종도착지가 없습니다.</span>}
+          </div>
+        </div>
+      )}
+
       {/* 메일 초안 카드 - 담당자별 */}
       {groups.length > 0 && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -413,12 +512,13 @@ export default function DocCutoffTab({
 
                 {/* 포함 부킹 목록 */}
                 <div className="bg-gray-50 rounded-lg p-2.5 space-y-1">
-                  {rows.map((b, i) => (
-                    <div key={b.id} className="flex items-start gap-2 text-xs">
+                  {rows.flatMap(b => destLinesOf(b, teamTruckDests, railDests).map(destText => ({ b, destText })))
+                    .map(({ b, destText }, i) => (
+                    <div key={`${b.id}_${i}`} className="flex items-start gap-2 text-xs">
                       <span className="text-gray-400 w-4 flex-shrink-0 pt-0.5">{i + 1}.</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-medium text-gray-800">{destWithTeamTruck(b, teamTruckDests)}</span>
+                          <span className="font-medium text-gray-800">{destText}</span>
                           <span className="text-gray-400">/</span>
                           <span className="text-gray-600">{b.vessel_name} {b.voyage}</span>
                           <span className="text-gray-400">/</span>

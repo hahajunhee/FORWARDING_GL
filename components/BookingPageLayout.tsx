@@ -32,6 +32,7 @@ interface Props {
   securedBases?: Record<string, { mqc: number; secured: number }>
   teamTruckDests?: string[]
   etaTransitDays?: Record<string, number>
+  railDests?: string[]
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -109,7 +110,7 @@ const MASTER_EMAIL = 'hahajunhee@glovis.net'
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns,
   regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [],
-  scheduleDestGroups = [], scheduleBlankWeeks = {}, securedBases = {}, teamTruckDests = [], etaTransitDays = {},
+  scheduleDestGroups = [], scheduleBlankWeeks = {}, securedBases = {}, teamTruckDests = [], etaTransitDays = {}, railDests = [],
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -276,6 +277,7 @@ export default function BookingPageLayout({
                 profiles={profiles}
                 currentUserId={currentUserId}
                 initialTeamTruckDests={teamTruckDests}
+                initialRailDests={railDests}
                 destinationOptions={destinationOptions}
               />
             </div>
