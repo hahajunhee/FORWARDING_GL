@@ -1545,13 +1545,36 @@ export default function BookingTable({
   canManageBookingRef.current = canManageBooking
 
   // 최종도착지별 행 배경색 맵
-  const destinationColorMap = useMemo(() => {
-    const map: Record<string, string> = {}
-    for (const l of customLists) {
-      if (l.list_type === 'destination' && l.color) map[l.name] = l.color
+  // 최종도착지 배경색 — custom_lists(전체 공유)의 목록 순서가 곧 우선순위
+  const destColorOrder = useMemo(
+    () => customLists.filter(l => l.list_type === 'destination')
+      .map(l => ({ name: (l.name || '').trim().toUpperCase(), color: l.color || '' })),
+    [customLists])
+
+  // 한 행에 도착지가 여러 개면 설정 목록에서 더 위에 있는 도착지의 색을 사용
+  const colorOfDest = useMemo(() => {
+    const idxOf = new Map<string, number>()
+    const colorOf = new Map<string, string>()
+    destColorOrder.forEach((d, i) => {
+      if (!idxOf.has(d.name)) idxOf.set(d.name, i)
+      if (d.color && !colorOf.has(d.name)) colorOf.set(d.name, d.color)
+    })
+    return (dest: string | null | undefined): string => {
+      const raw = (dest || '').trim()
+      if (!raw) return ''
+      const whole = colorOf.get(raw.toUpperCase())
+      if (whole) return whole
+      let best = -1, bestColor = ''
+      for (const p of splitDests(raw)) {
+        const key = p.toUpperCase()
+        const c = colorOf.get(key)
+        if (!c) continue
+        const i = idxOf.get(key) ?? Number.MAX_SAFE_INTEGER
+        if (best === -1 || i < best) { best = i; bestColor = c }
+      }
+      return bestColor
     }
-    return map
-  }, [customLists])
+  }, [destColorOrder])
 
   const carrierColorMap = useMemo(() => {
     const map: Record<string, string> = {}
@@ -2349,7 +2372,7 @@ export default function BookingTable({
     const effClosed = !!merged.is_closed
     // 더블클릭·편집 중인 행은 노란 하이라이트가 최우선 (현재 위치 확인용)
     const isFocusRow = focusRowId === booking.id
-    const handlerColor = isFocusRow ? '#fef08a' : effClosed ? '#D9D9D9' : (destinationColorMap[booking.final_destination || ''] || '')
+    const handlerColor = isFocusRow ? '#fef08a' : effClosed ? '#D9D9D9' : (colorOfDest(booking.final_destination) || '')
     const isOwnBooking = canManageBooking(booking)
 
     const myDest = booking.final_destination || ''
@@ -2546,7 +2569,7 @@ export default function BookingTable({
   function renderBlankSailingRow(row: BlankSailingRow, rowIdx: number, rowSpans: Record<string, SpanInfo>, prevRow?: DisplayRow | null, nextRow?: DisplayRow | null) {
     const colBorder = `${tableStyle.cellBorderWidth}px solid ${tableStyle.cellBorderColor}`
     const groupBorder = `${tableStyle.groupBorderWidth}px solid ${tableStyle.groupBorderColor}`
-    const handlerColor = destinationColorMap[row.final_destination || ''] || ''
+    const handlerColor = colorOfDest(row.final_destination) || ''
 
     // 그룹 경계 판단 (DisplayRow 기반)
     const getFd = (r: DisplayRow | null | undefined) => r ? ('_blankSailing' in r ? r.final_destination : r.final_destination) || '' : ''

@@ -54,13 +54,41 @@ function ListManager({ listType, items, defaultItems, placeholder }: ListManager
     })
   }
 
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [overIdx, setOverIdx] = useState<number | null>(null)
+
+  const applyOrder = (next: typeof orderedItems) => {
+    setOrderedItems(next)
+    startTransition(async () => { await saveCustomListOrder(next.map(i => i.id)) })
+  }
+
   const moveItem = (idx: number, dir: 'up' | 'down') => {
     const swapIdx = dir === 'up' ? idx - 1 : idx + 1
     if (swapIdx < 0 || swapIdx >= orderedItems.length) return
     const next = [...orderedItems]
     ;[next[idx], next[swapIdx]] = [next[swapIdx], next[idx]]
-    setOrderedItems(next)
-    startTransition(async () => { await saveCustomListOrder(next.map(i => i.id)) })
+    applyOrder(next)
+  }
+
+  // 맨 위 / 맨 아래로 한 번에 이동
+  const moveEdge = (idx: number, to: 'top' | 'bottom') => {
+    if ((to === 'top' && idx === 0) || (to === 'bottom' && idx === orderedItems.length - 1)) return
+    const next = [...orderedItems]
+    const [item] = next.splice(idx, 1)
+    if (to === 'top') next.unshift(item)
+    else next.push(item)
+    applyOrder(next)
+  }
+
+  // 드래그로 원하는 위치에 바로 놓기
+  const handleDrop = (targetIdx: number) => {
+    const from = dragIdx
+    setDragIdx(null); setOverIdx(null)
+    if (from === null || from === targetIdx) return
+    const next = [...orderedItems]
+    const [item] = next.splice(from, 1)
+    next.splice(targetIdx, 0, item)
+    applyOrder(next)
   }
 
   return (
@@ -77,10 +105,25 @@ function ListManager({ listType, items, defaultItems, placeholder }: ListManager
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
+      <p className="text-xs text-gray-400">
+        드래그(⠿)하거나 ↑ ↓ ⇈ ⇊ 로 순서를 바꿀 수 있습니다. 순서는 모든 사용자에게 공통으로 적용되며,
+        {listType === 'destination' && ' 위에 있을수록 우선순위가 높아 한 행에 도착지가 여러 개일 때 그 색이 배경색으로 쓰입니다.'}
+        {listType !== 'destination' && ' 목록 표시 순서로 사용됩니다.'}
+      </p>
+
       {orderedItems.length > 0 ? (
         <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
           {orderedItems.map((item, idx) => (
-            <div key={item.id} className="flex items-center gap-2 px-3 py-2">
+            <div key={item.id}
+              draggable={editingId !== item.id}
+              onDragStart={() => setDragIdx(idx)}
+              onDragOver={e => { e.preventDefault(); setOverIdx(idx) }}
+              onDragLeave={() => setOverIdx(o => (o === idx ? null : o))}
+              onDrop={e => { e.preventDefault(); handleDrop(idx) }}
+              onDragEnd={() => { setDragIdx(null); setOverIdx(null) }}
+              className={`flex items-center gap-2 px-3 py-2 transition-colors ${
+                dragIdx === idx ? 'opacity-40' : ''
+              } ${overIdx === idx && dragIdx !== null && dragIdx !== idx ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : ''}`}>
               {editingId === item.id ? (
                 <>
                   <input type="text" value={editingName} onChange={e => setEditingName(e.target.value)}
@@ -93,11 +136,18 @@ function ListManager({ listType, items, defaultItems, placeholder }: ListManager
                 </>
               ) : (
                 <>
-                  <div className="flex flex-col gap-0.5">
-                    <button onClick={() => moveItem(idx, 'up')} disabled={idx === 0 || isPending}
+                  <span className="w-5 text-center text-[11px] text-gray-400 cursor-grab active:cursor-grabbing select-none"
+                    title="드래그해서 원하는 위치로 옮기세요">⠿</span>
+                  <span className="w-6 text-center text-[11px] font-bold text-gray-400">{idx + 1}</span>
+                  <div className="grid grid-cols-2 gap-x-0.5">
+                    <button onClick={() => moveItem(idx, 'up')} disabled={idx === 0 || isPending} title="위로"
                       className="w-5 h-4 text-gray-300 hover:text-gray-600 disabled:opacity-20 text-xs leading-none text-center">↑</button>
-                    <button onClick={() => moveItem(idx, 'down')} disabled={idx === orderedItems.length - 1 || isPending}
+                    <button onClick={() => moveEdge(idx, 'top')} disabled={idx === 0 || isPending} title="맨 위로"
+                      className="w-5 h-4 text-gray-300 hover:text-blue-600 disabled:opacity-20 text-xs leading-none text-center">⇈</button>
+                    <button onClick={() => moveItem(idx, 'down')} disabled={idx === orderedItems.length - 1 || isPending} title="아래로"
                       className="w-5 h-4 text-gray-300 hover:text-gray-600 disabled:opacity-20 text-xs leading-none text-center">↓</button>
+                    <button onClick={() => moveEdge(idx, 'bottom')} disabled={idx === orderedItems.length - 1 || isPending} title="맨 아래로"
+                      className="w-5 h-4 text-gray-300 hover:text-blue-600 disabled:opacity-20 text-xs leading-none text-center">⇊</button>
                   </div>
                   {(listType === 'destination' || listType === 'carrier') && (
                     <div className="flex items-center gap-1">
