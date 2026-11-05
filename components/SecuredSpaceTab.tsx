@@ -170,19 +170,38 @@ export default function SecuredSpaceTab({
   const [bases, setBases] = useState<Record<string, BaseSetting>>(initialBases)
   const [baseOpen, setBaseOpen] = useState(false)
   const [handlerIds, setHandlerIds] = useState<string[]>([])
-  // PROFORMA ETD 기간 필터 — 기본값: 오늘 +10일이 속한 달의 1일 ~ 말일
-  const [etdFrom, setEtdFrom] = useState<string>(() => {
+  // 출항기간 필터 — 처음 열 때는 오늘 +10일이 속한 달,
+  // 이후에는 마지막으로 지정한 기간을 기억해서 그대로 보여준다.
+  const [etdFrom, _setEtdFrom] = useState<string>(() => {
     const d = addDays(new Date(), 10)
     return format(new Date(d.getFullYear(), d.getMonth(), 1), 'yyyy-MM-dd')
   })
-  const [etdTo, setEtdTo] = useState<string>(() => {
+  const [etdTo, _setEtdTo] = useState<string>(() => {
     const d = addDays(new Date(), 10)
     return format(new Date(d.getFullYear(), d.getMonth() + 1, 0), 'yyyy-MM-dd')
   })
+  const setEtdFrom = (v: string) => {
+    _setEtdFrom(v)
+    try { localStorage.setItem('ss_etd_from', v) } catch {}
+  }
+  const setEtdTo = (v: string) => {
+    _setEtdTo(v)
+    try { localStorage.setItem('ss_etd_to', v) } catch {}
+  }
+  // 마지막 설정값 불러오기 (SSR 불일치 방지를 위해 마운트 후 적용)
+  useEffect(() => {
+    try {
+      const f = localStorage.getItem('ss_etd_from')
+      const t = localStorage.getItem('ss_etd_to')
+      if (f) _setEtdFrom(f)
+      if (t) _setEtdTo(t)
+    } catch {}
+  }, [])
+
   const [rfOff, setRfOff] = useState(true)
   const [showBlank, setShowBlank] = useState(true)
   // 조회·주차 판정 기준 날짜 (출항기간 필터 + 주차 열 + BLANK SAILING + MQC 배정)
-  const [weekBase, setWeekBase] = useState<'proforma' | 'updated'>('updated')
+  const [weekBase, setWeekBase] = useState<'proforma' | 'updated'>('proforma')
   const [mapOpen, setMapOpen] = useState(false)
   const [weekCfgOpen, setWeekCfgOpen] = useState(false)
   const [colFilters, setColFilters] = useState<Record<string, string[]>>({})
