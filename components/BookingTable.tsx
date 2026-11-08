@@ -416,7 +416,7 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
       if ('_blankSailing' in r) {
         if (col.key === 'final_destination') return r.final_destination
         if (col.key === 'vessel_name') return 'BLANK SAILING'
-        if (col.key === 'week_no') return getWeekLabel(r.weekNum)
+        if (col.key === 'week_no') return `W${r.weekNum}`
         return ''
       }
       const b = r as Booking
@@ -436,8 +436,9 @@ function exportToExcel(rows: DisplayRow[], customColumns: ColumnDefinition[]) {
         case 'vessel_name':          return b.vessel_name || ''
         case 'voyage':               return b.voyage || ''
         case 'week_no': {
+          // 엑셀에서는 "38주차 (9/14~9/20)"가 아니라 W38 형태로
           const wn = getWeekNum(b.proforma_etd)
-          return wn !== null ? getWeekLabel(wn) : ''
+          return wn !== null ? `W${wn}` : ''
         }
         case 'secured_space':        return b.secured_space || ''
         case 'mqc':                  return b.mqc || ''
