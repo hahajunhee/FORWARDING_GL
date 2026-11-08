@@ -2339,6 +2339,30 @@ export default function BookingTable({
     })
   }
 
+  // 엑셀 다운로드는 화면 필터와 무관하게 전체 부킹을 내보낸다 (정렬만 현재 설정 반영)
+  const exportRows = useMemo(() => {
+    if (sorts.length === 0) return bookings
+    const destOrderMap = destinationSortOrder.length > 0
+      ? Object.fromEntries(destinationSortOrder.map((d, i) => [d, i]))
+      : null
+    return [...bookings].sort((a, b) => {
+      for (const { col, dir } of sorts) {
+        const va = getSortValue(a, col, customColumns)
+        const vb = getSortValue(b, col, customColumns)
+        let cmp: number
+        if (col === 'final_destination' && destOrderMap) {
+          const ia = destOrderMap[va] ?? 9999
+          const ib = destOrderMap[vb] ?? 9999
+          cmp = ia !== ib ? ia - ib : va.localeCompare(vb)
+        } else {
+          cmp = va.localeCompare(vb)
+        }
+        if (cmp !== 0) return dir === 'asc' ? cmp : -cmp
+      }
+      return 0
+    })
+  }, [bookings, sorts, customColumns, destinationSortOrder])
+
   const allProcessedIds = processed.map(b => b.id)
   const allSelected = allProcessedIds.length > 0 && allProcessedIds.every(id => selectedRows.has(id))
 
@@ -2867,7 +2891,9 @@ export default function BookingTable({
               </svg>
               내륙운송
             </button>
-            <button onClick={() => exportToExcel(displayRows, customColumns)} disabled={displayRows.length === 0}
+            <button onClick={() => exportToExcel(exportRows, customColumns)} disabled={exportRows.length === 0}
+              title="화면 필터와 상관없이 전체 부킹을 내보냅니다"
+
               className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
