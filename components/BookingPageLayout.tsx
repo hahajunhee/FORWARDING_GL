@@ -8,11 +8,12 @@ import ReeferCutoffTab from './ReeferCutoffTab'
 import ScheduleNewTab from './ScheduleNewTab'
 import SecuredSpaceTab from './SecuredSpaceTab'
 import CutoffEtdTab from './CutoffEtdTab'
+import EtdSyncTab from './EtdSyncTab'
 import { signOut } from '@/app/bookings/actions'
 import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS, CARRIERS } from '@/types'
 
-type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'cutoff_etd'
+type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'cutoff_etd' | 'etd_sync'
 
 interface Props {
   bookings: Booking[]
@@ -77,6 +78,17 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+      </svg>
+    ),
+  },
+  {
+    key: 'etd_sync',
+    label: 'ETD 자동확인',
+    sub: '터미널 스케줄 대조',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
       </svg>
     ),
   },
@@ -302,6 +314,21 @@ export default function BookingPageLayout({
                 profiles={profiles}
                 currentUserId={currentUserId}
                 customColumns={customColumns}
+                etaTransitDays={etaTransitDays}
+              />
+            </div>
+          )}
+          {activeTab === 'etd_sync' && (
+            <div className="flex-1 overflow-auto p-2 md:p-4 space-y-3">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">ETD 자동확인</h2>
+                <p className="text-sm text-gray-500">모선명으로 터미널 공식 스케줄(하루 2회 수집)을 조회해 UPDATED ETD와 비교합니다. 직접 체크하고 반영을 눌러야 부킹장에 저장됩니다.</p>
+              </div>
+              <EtdSyncTab
+                bookings={bookings}
+                profiles={profiles}
+                currentUserId={currentUserId}
+                currentProfile={currentProfile}
                 etaTransitDays={etaTransitDays}
               />
             </div>

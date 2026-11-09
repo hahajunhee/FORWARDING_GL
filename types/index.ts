@@ -41,6 +41,7 @@ export interface Profile {
   column_order: string[] | null
   pinned_columns: string[] | null
   vessel_prefs?: VesselPrefs | null
+  etd_terminal_prefs?: Record<string, string[]> | null  // 선사 → 기본 터미널 (ETD 확인 탭)
   doc_template: string | null
   color: string | null
   region: string | null
