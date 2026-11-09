@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { differenceInCalendarDays, parseISO, isValid, format, addDays } from 'date-fns'
 import { ko } from 'date-fns/locale'
+import type { EtdHint } from '@/lib/etd-hint'
 import type { Booking, Profile, CustomList, ColumnDefinition, BookingEntry, TableStyle } from '@/types'
 import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, CARRIERS, MAJOR_PORTS, DEFAULT_DESTINATIONS, DEFAULT_TABLE_STYLE } from '@/types'
 import { deleteBooking, saveColumnOrder, bulkSaveBookings, bulkDeleteBookings } from '@/app/bookings/actions'
@@ -1083,7 +1084,8 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
 
 // ── 뷰 셀 ─────────────────────────────────────────────────────────
 
-function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorMap = {} }: {
+function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorMap = {}, etdHint }: {
+  etdHint?: EtdHint | null
   colKey: string; booking: Booking; currentUserId: string; customColumns: ColumnDefinition[]; carrierColorMap?: Record<string, string>
 }) {
   switch (colKey) {
@@ -1157,7 +1159,18 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
     case 'proforma_etd':
       return <span className="text-gray-700 text-xs font-medium">{fmtDate(booking.proforma_etd)}</span>
     case 'updated_etd':
-      return <span className={`text-xs ${getEtdClass(booking.updated_etd)}`}>{fmtDate(booking.updated_etd)}</span>
+      return (
+        <span className="inline-flex items-center gap-1">
+          <span className={`text-xs ${getEtdClass(booking.updated_etd)}`}>{fmtDate(booking.updated_etd)}</span>
+          {etdHint && (
+            <span title={etdHint.tip}
+              className={`text-[10px] leading-none px-1 py-0.5 rounded font-bold cursor-help ${
+                etdHint.diff > 0 ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>
+              {etdHint.diff > 0 ? '+' : ''}{etdHint.diff}{etdHint.n > 1 ? '?' : ''}
+            </span>
+          )}
+        </span>
+      )
     case 'eta':
       return <span className="text-xs">{fmtDate(booking.eta)}</span>
     case 'containers':
@@ -1240,6 +1253,7 @@ interface Props {
   destinationSortOrder?: string[]
   tableStyle?: TableStyle
   etaTransitDays?: TransitMap
+  etdHints?: Record<string, EtdHint>   // 터미널 스케줄 대비 ETD 차이(+3 표시용)
   onSettingsClick?: () => void
 }
 
@@ -1254,6 +1268,7 @@ export default function BookingTable({
   destinationSortOrder = [],
   tableStyle = DEFAULT_TABLE_STYLE,
   etaTransitDays = {},
+  etdHints = {},
   onSettingsClick,
 }: Props) {
   const router = useRouter()
@@ -2542,7 +2557,7 @@ export default function BookingTable({
               <div style={colWidths[col] ? { width: Math.max(16, colWidths[col] - 18), overflow: 'hidden' } : undefined}>
               {canEditCell
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} transitDays={transitDays} />
-                : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} />
+                : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} etdHint={etdHints[booking.id] || null} />
               }
               {col === 'booking_no' && !canEditCell && groupMap[booking.id] && (
                 <button

@@ -2,36 +2,44 @@
 
 import { createClient } from '@/lib/supabase-server'
 import { revalidatePath } from 'next/cache'
-import { fetchCandidates, normVessel, type TerminalCandidate } from '@/lib/terminal-schedule'
+import { fetchCandidatesBatch, normVessel, type TerminalCandidate } from '@/lib/terminal-schedule'
 
-// ── 모선명별 터미널 스케줄 후보 조회 ───────────────────────────────
+// ── 모선명별 터미널 스케줄 후보 조회 (API 1회 호출) ─────────────────
 export async function searchEtdCandidates(
   vessels: string[],
 ): Promise<{ byVessel: Record<string, TerminalCandidate[]>; error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { byVessel: {}, error: '로그인이 필요합니다.' }
+  const { byKey, error } = await fetchCandidatesBatch(vessels)
+  return { byVessel: byKey, error: error || null }
+}
 
-  // 정규화한 이름 기준으로 중복 제거, 한 번에 최대 120척
-  const uniq = new Map<string, string>()
-  for (const v of vessels) {
-    const k = normVessel(v)
-    if (k && !uniq.has(k)) uniq.set(k, v.trim())
-  }
-  const list = [...uniq.entries()].slice(0, 120)
+// ── 부킹장 표의 "+3" 표시용: UPDATED ETD가 오늘 이후인 부킹들의 후보를 한 번에 ────
+export interface EtdHintCand { s: string; e: string; t: string | null; v: string | null }
 
-  const byVessel: Record<string, TerminalCandidate[]> = {}
-  let firstError: string | null = null
-  const CONC = 6
-  for (let i = 0; i < list.length; i += CONC) {
-    await Promise.all(list.slice(i, i + CONC).map(async ([k, name]) => {
-      const { rows, error } = await fetchCandidates(name)
-      byVessel[k] = rows
-      if (error && !firstError) firstError = error
-    }))
-    if (firstError && Object.keys(byVessel).length === Math.min(CONC, list.length)) break // 설정 오류면 더 시도하지 않음
+export async function fetchEtdHints(
+  items: { id: string; vessel_name: string; updated_etd: string }[],
+): Promise<{ hints: Record<string, EtdHintCand[]>; error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { hints: {}, error: '로그인이 필요합니다.' }
+
+  const { byKey, error } = await fetchCandidatesBatch(items.map(i => i.vessel_name))
+  const dayMs = 86400000
+  const toMs = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return Date.UTC(y, m - 1, dd) }
+  const hints: Record<string, EtdHintCand[]> = {}
+  for (const it of items) {
+    const all = byKey[normVessel(it.vessel_name)] || []
+    const cur = toMs(it.updated_etd)
+    const near = all
+      .filter(c => c.etd && Math.abs(Math.round((toMs(c.etd.slice(0, 10)) - cur) / dayMs)) <= 21)
+      .sort((a, b) => Math.abs(toMs((a.etd as string).slice(0, 10)) - cur) - Math.abs(toMs((b.etd as string).slice(0, 10)) - cur))
+      .slice(0, 8)
+      .map(c => ({ s: c.source, e: (c.etd as string).slice(0, 10), t: (c.etd as string).slice(11, 16) || null, v: c.terminal_voyage }))
+    if (near.length > 0) hints[it.id] = near
   }
-  return { byVessel, error: firstError }
+  return { hints, error: error || null }
 }
 
 // ── 선사 → 기본 터미널 매핑 저장 (유저별) ──────────────────────────

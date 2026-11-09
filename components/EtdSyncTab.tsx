@@ -52,7 +52,7 @@ export default function EtdSyncTab({ bookings, profiles, currentUserId, currentP
   // ── 조회 조건 ──────────────────────────────────────────────
   const [handlerId, setHandlerId] = useState(currentUserId)
   const [carrierFilter, setCarrierFilter] = useState('')
-  const [etdFrom, setEtdFrom] = useState(() => format(addDays(new Date(), -3), 'yyyy-MM-dd'))
+  const [etdFrom, setEtdFrom] = useState(() => format(new Date(), 'yyyy-MM-dd'))
   const [etdTo, setEtdTo] = useState(() => format(addDays(new Date(), 30), 'yyyy-MM-dd'))
   const [onlyOpen, setOnlyOpen] = useState(true)
   const [keyword, setKeyword] = useState('')
@@ -328,7 +328,7 @@ export default function EtdSyncTab({ bookings, profiles, currentUserId, currentP
                 <th className={th}>최종도착지</th>
                 <th className={th}>모선명</th>
                 <th className={th}>현재 UPDATED ETD</th>
-                <th className={th} style={{ minWidth: 330 }}>터미널 스케줄 (선택)</th>
+                <th className={th} style={{ minWidth: 380 }}>터미널 스케줄 (선택)</th>
                 <th className={th}>새 ETD</th>
                 <th className={th}>변동</th>
                 <th className={th}>부킹번호</th>
@@ -360,12 +360,15 @@ export default function EtdSyncTab({ bookings, profiles, currentUserId, currentP
                               setChoice(p => ({ ...p, [b.id]: e.target.value }))
                               setChecked(p => { const n = new Set(p); n.delete(b.id); return n })
                             }}
-                            className="text-xs border border-slate-200 rounded-lg px-1.5 py-1 bg-white max-w-[330px]">
-                            {list.map(c => (
-                              <option key={candKey(c)} value={candKey(c)}>
-                                {`${pref.includes(c.source) ? '★ ' : ''}${c.source} · ETD ${fmtDT(c.etd)} · ETA ${fmtDT(c.eta)}${c.cutoff ? ` · CUT ${fmtDT(c.cutoff)}` : ''}${c.terminal_voyage ? ` · ${c.terminal_voyage}` : ''}`}
-                              </option>
-                            ))}
+                            className="text-xs border border-slate-200 rounded-lg px-1.5 py-1 bg-white max-w-[380px]">
+                            {list.map(c => {
+                              const dd = (b.updated_etd && c.etd) ? dayDiff(b.updated_etd, dateOf(c.etd)) : null
+                              return (
+                                <option key={candKey(c)} value={candKey(c)}>
+                                  {`${pref.includes(c.source) ? '★ ' : ''}${c.source}${c.terminal_voyage ? ` ${c.terminal_voyage}` : ''} · ETD ${fmtDT(c.etd)}${dd != null && dd !== 0 ? ` (${dd > 0 ? '+' : ''}${dd}일)` : dd === 0 ? ' (동일)' : ''} · ETA ${fmtDT(c.eta)}${c.cutoff ? ` · CUT ${fmtDT(c.cutoff)}` : ''}`}
+                                </option>
+                              )
+                            })}
                           </select>
                           {ambiguous && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold whitespace-nowrap">{`${list.length}건 중 확인`}</span>}
                           {(offPref || noPref) && sel && carrierKey(b.carrier) && (

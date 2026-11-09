@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import BookingTable from './BookingTable'
 import DocCutoffTab from './DocCutoffTab'
@@ -10,6 +10,8 @@ import SecuredSpaceTab from './SecuredSpaceTab'
 import CutoffEtdTab from './CutoffEtdTab'
 import EtdSyncTab from './EtdSyncTab'
 import { signOut } from '@/app/bookings/actions'
+import { fetchEtdHints, type EtdHintCand } from '@/app/bookings/etdSyncActions'
+import { bestHint, type EtdHint } from '@/lib/etd-hint'
 import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS, CARRIERS } from '@/types'
 
@@ -129,6 +131,34 @@ export default function BookingPageLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false) // 모바일 드로어
 
   const pinnedColumns = currentProfile?.pinned_columns || DEFAULT_PINNED_COLUMNS
+
+  // ── 터미널 스케줄 대비 ETD 차이(+3 표시): 화면이 먼저 뜬 뒤 백그라운드로 한 번에 조회 ──
+  // 대상: UPDATED ETD가 오늘 이후(포함)인 부킹. 값은 바꾸지 않고 차이만 보여준다.
+  const [hintCands, setHintCands] = useState<Record<string, EtdHintCand[]>>({})
+  const hintKey = useMemo(() => {
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+    const items = bookings
+      .filter(b => b.vessel_name?.trim() && b.updated_etd && b.updated_etd >= today)
+      .map(b => ({ id: b.id, vessel_name: b.vessel_name.trim(), updated_etd: b.updated_etd as string }))
+    return JSON.stringify(items)
+  }, [bookings])
+  useEffect(() => {
+    const items = JSON.parse(hintKey) as { id: string; vessel_name: string; updated_etd: string }[]
+    if (items.length === 0) { setHintCands({}); return }
+    let alive = true
+    fetchEtdHints(items).then(r => { if (alive) setHintCands(r.hints) }).catch(() => {})
+    return () => { alive = false }
+  }, [hintKey])
+  const etdHints = useMemo(() => {
+    const prefs = currentProfile?.etd_terminal_prefs || {}
+    const out: Record<string, EtdHint> = {}
+    for (const b of bookings) {
+      if (!b.updated_etd || !hintCands[b.id]) continue
+      const h = bestHint(b.updated_etd, hintCands[b.id], prefs[(b.carrier || '').trim().toUpperCase()] || [])
+      if (h) out[b.id] = h
+    }
+    return out
+  }, [bookings, hintCands, currentProfile])
   // 설정(최종도착지 목록) 기준 — 도착지 등록 후보로 사용
   const destinationOptions = (() => {
     const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
@@ -273,6 +303,7 @@ export default function BookingPageLayout({
                 destinationSortOrder={destinationSortOrder}
                 tableStyle={currentProfile?.table_style || DEFAULT_TABLE_STYLE}
                 etaTransitDays={etaTransitDays}
+                etdHints={etdHints}
               />
             </div>
           )}

@@ -70,3 +70,50 @@ export async function fetchCandidates(vessel: string): Promise<{ rows: TerminalC
     return { rows: [], error: '스케줄 서버에 연결하지 못했습니다.' }
   }
 }
+
+/** 모선명 여러 개를 API 한 번(POST /api/schedule/batch)으로 조회. 정규화한 모선명 → 후보 목록. */
+export async function fetchCandidatesBatch(
+  names: string[],
+): Promise<{ byKey: Record<string, TerminalCandidate[]>; error?: string }> {
+  const base = process.env.TERMINAL_API_BASE
+  const key = process.env.TERMINAL_API_KEY
+  if (!base || !key) return { byKey: {}, error: 'TERMINAL_API_BASE / TERMINAL_API_KEY 환경변수가 설정되지 않았습니다.' }
+
+  const uniq = new Map<string, string>()
+  for (const n of names) { const k = normVessel(n); if (k && !uniq.has(k)) uniq.set(k, n) }
+  if (uniq.size === 0) return { byKey: {} }
+
+  const now = new Date()
+  const from = new Date(now); from.setDate(from.getDate() - 14)
+  const to = new Date(now); to.setDate(to.getDate() + 150)
+
+  try {
+    const r = await fetch(`${base.replace(/\/$/, '')}/api/schedule/batch`, {
+      method: 'POST',
+      headers: { 'X-API-Key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names: [...uniq.values()], from: ymd(from), to: ymd(to), field: 'etd' }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(25000),
+    })
+    if (!r.ok) return { byKey: {}, error: `스케줄 서버 응답 오류 (${r.status})` }
+    const j = (await r.json()) as { rows: ApiRow[] }
+    const byKey: Record<string, TerminalCandidate[]> = {}
+    for (const [k, name] of uniq) byKey[k] = []
+    for (const x of j.rows || []) {
+      if (!x.vessel) continue
+      const tv = normVessel(x.vessel)
+      for (const [k, name] of uniq) {
+        if (vesselScore(name, x.vessel) > 0 || tv === k) {
+          byKey[k].push({
+            source: x.source, terminal: x.terminal, vessel: x.vessel, terminal_voyage: x.terminal_voyage,
+            carrier: x.carrier, berth: x.berth, cutoff: x.cutoff, eta: x.eta, etd: x.etd, status: x.status,
+            collected_at: x.collected_at,
+          })
+        }
+      }
+    }
+    return { byKey }
+  } catch {
+    return { byKey: {}, error: '스케줄 서버에 연결하지 못했습니다.' }
+  }
+}
