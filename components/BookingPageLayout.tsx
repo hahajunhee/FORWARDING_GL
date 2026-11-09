@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import BookingTable from './BookingTable'
 import DocCutoffTab from './DocCutoffTab'
@@ -10,7 +10,8 @@ import SecuredSpaceTab from './SecuredSpaceTab'
 import CutoffEtdTab from './CutoffEtdTab'
 import EtdSyncTab from './EtdSyncTab'
 import { signOut } from '@/app/bookings/actions'
-import { fetchEtdHints, type EtdHintCand } from '@/app/bookings/etdSyncActions'
+import type { EtdHintCand } from '@/app/bookings/etdSyncActions'
+import { normVessel } from '@/lib/terminal-schedule'
 import { bestHint, type EtdHint } from '@/lib/etd-hint'
 import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS, CARRIERS } from '@/types'
@@ -134,31 +135,54 @@ export default function BookingPageLayout({
 
   // ── 터미널 스케줄 대비 ETD 차이(+3 표시): 화면이 먼저 뜬 뒤 백그라운드로 한 번에 조회 ──
   // 대상: UPDATED ETD가 오늘 이후(포함)인 부킹. 값은 바꾸지 않고 차이만 보여준다.
-  const [hintCands, setHintCands] = useState<Record<string, EtdHintCand[]>>({})
-  const hintKey = useMemo(() => {
+  // 모선명 단위로 한 번만 조회·캐시한다(ETD만 고친 저장에는 재조회하지 않음). 일반 fetch라 저장 요청을 막지 않는다.
+  const [vesselCands, setVesselCands] = useState<Record<string, EtdHintCand[]>>({})
+  const fetchedRef = useRef<Set<string>>(new Set())
+  const vesselKey = useMemo(() => {
     const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
-    const items = bookings
-      .filter(b => b.vessel_name?.trim() && b.updated_etd && b.updated_etd >= today)
-      .map(b => ({ id: b.id, vessel_name: b.vessel_name.trim(), updated_etd: b.updated_etd as string }))
-    return JSON.stringify(items)
+    const names = new Set<string>()
+    for (const b of bookings) {
+      if (b.vessel_name?.trim() && b.updated_etd && b.updated_etd >= today) names.add(b.vessel_name.trim())
+    }
+    return JSON.stringify([...names].sort())
   }, [bookings])
   useEffect(() => {
-    const items = JSON.parse(hintKey) as { id: string; vessel_name: string; updated_etd: string }[]
-    if (items.length === 0) { setHintCands({}); return }
-    let alive = true
-    fetchEtdHints(items).then(r => { if (alive) setHintCands(r.hints) }).catch(() => {})
-    return () => { alive = false }
-  }, [hintKey])
+    const names = (JSON.parse(vesselKey) as string[]).filter(n => !fetchedRef.current.has(normVessel(n)))
+    if (names.length === 0) return
+    names.forEach(n => fetchedRef.current.add(normVessel(n)))
+    const ctl = new AbortController()
+    let done = false
+    const release = () => names.forEach(n => fetchedRef.current.delete(normVessel(n)))
+    const timer = setTimeout(() => {
+      fetch('/api/etd-hints', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vessels: names }), signal: ctl.signal,
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(j => { if (j?.byKey) { done = true; setVesselCands(prev => ({ ...prev, ...j.byKey })) } else release() })
+        .catch(() => { release() })
+    }, 800)
+    return () => { clearTimeout(timer); if (!done) { ctl.abort(); release() } }
+  }, [vesselKey])
   const etdHints = useMemo(() => {
     const prefs = currentProfile?.etd_terminal_prefs || {}
+    const toMs = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return Date.UTC(y, m - 1, dd) }
     const out: Record<string, EtdHint> = {}
     for (const b of bookings) {
-      if (!b.updated_etd || !hintCands[b.id]) continue
-      const h = bestHint(b.updated_etd, hintCands[b.id], prefs[(b.carrier || '').trim().toUpperCase()] || [])
+      if (!b.updated_etd || !b.vessel_name) continue
+      const all = vesselCands[normVessel(b.vessel_name)]
+      if (!all) continue
+      const cur = toMs(b.updated_etd)
+      const near = all
+        .filter(c => Math.abs((toMs(c.e) - cur) / 86400000) <= 21)
+        .sort((x, y) => Math.abs(toMs(x.e) - cur) - Math.abs(toMs(y.e) - cur))
+        .slice(0, 8)
+      if (near.length === 0) continue
+      const h = bestHint(b.updated_etd, near, prefs[(b.carrier || '').trim().toUpperCase()] || [])
       if (h) out[b.id] = h
     }
     return out
-  }, [bookings, hintCands, currentProfile])
+  }, [bookings, vesselCands, currentProfile])
   // 설정(최종도착지 목록) 기준 — 도착지 등록 후보로 사용
   const destinationOptions = (() => {
     const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
