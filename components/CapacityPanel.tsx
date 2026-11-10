@@ -66,6 +66,7 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
   const [cells, setCells] = useState<Set<string>>(new Set())
   const [mode, setMode] = useState<FcMode>('pdc')
   const [qty, setQty] = useState<Record<string, number>>({})
+  const [copied, setCopied] = useState(false)
 
   // 마지막 선택 복원(이 브라우저에서만)
   useEffect(() => {
@@ -111,21 +112,55 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
     () => (data && picked.length > 0 ? calcSelection({ rows: picked, data, cells: validCells, mode, qty }) : null),
     [data, picked, validCells, mode, qty])
 
-  const copyTsv = async () => {
+  // 표 복사: 화면과 같은 구조(11열, 병합·색·테두리)를 HTML로 복사 → 엑셀/워드에 붙여넣으면 열 위치와 테두리가 그대로 유지된다.
+  // 같은 내용을 탭 구분 텍스트로도 함께 담아, 메모장 등에는 텍스트로 붙는다.
+  const copyTable = async () => {
     if (!result) return
-    const L: string[][] = [['모선명', 'VOYAGE', '서류마감', 'PROFORMA ETD', 'UPDATED ETD', 'ETA', '컨테이너', '확보수량', '추가(누적발생)', '잔량', '부킹번호']]
-    L.push(['초기 잔량', '', '', '', '', '', '', '', '', String(result.initial), ''])
+    type C = { t: string; span?: number; bg?: string; fg?: string; bold?: boolean; align?: 'left' | 'center' | 'right' }
+    const NCOL = 11
+    const head: C[] = ['모선명', 'VOYAGE', '서류마감', 'PROFORMA ETD', 'UPDATED ETD', 'ETA', '컨테이너', '확보수량', '추가(누적발생)', '잔량', '부킹번호']
+      .map(t => ({ t, bg: '#2f5597', fg: '#ffffff', bold: true, align: 'center' as const }))
+    const rows: C[][] = [head]
+    const bal = (n: number): C => ({ t: n > 0 ? `부족 ${n}대` : n < 0 ? `여유 ${-n}대` : '딱 맞음', bg: '', fg: n > 0 ? '#dc2626' : '#059669', bold: true, align: 'center' })
+    const c = (t: string, o: Partial<C> = {}): C => ({ t, align: 'center', ...o })
+
+    rows.push([c('초기 잔량 (선택한 PDC×선사의 현재 마감 안 친 컨테이너 합)', { span: 7, bg: '#f1f5f9', bold: true }),
+      c('-', { bg: '#f1f5f9' }), c('-', { bg: '#f1f5f9' }), c(String(result.initial), { bg: '#f1f5f9', bold: true }), c('-', { bg: '#f1f5f9' })])
     for (const g of result.groups) {
       for (const b of g.rows) {
-        L.push([b.vessel_name, b.voyage, md(b.doc_cutoff_date), md(b.proforma_etd), md(b.updated_etd), md(b.eta),
-          formatContainers(b), String(qty[b.id] ?? unitQty(b)), '', '', b.booking_no])
+        rows.push([c(b.vessel_name, { align: 'left' }), c(b.voyage || ''), c(md(b.doc_cutoff_date)), c(md(b.proforma_etd)), c(md(b.updated_etd)), c(md(b.eta)),
+          c(formatContainers(b)), c(String(qty[b.id] ?? unitQty(b))), c('-'), c('-'), c(b.booking_no || '', { align: 'left' })])
       }
-      L.push([`${md(g.cutoff)} 마감 (계산구간 ${g.days}일, 이월 ${g.carryIn}대)`, '', '', '', '', '', '', String(g.secured), String(g.add),
-        g.balance > 0 ? `부족 ${g.balance}대` : g.balance < 0 ? `여유 ${-g.balance}대` : '딱 맞음', ''])
+      const gb = bal(g.balance); gb.bg = '#fef3c7'
+      rows.push([c(`${md(g.cutoff)} 마감 (계산구간 ${g.days}일${g.workDays !== g.days ? `·영업 ${g.workDays}일` : ''}, 이월 ${g.carryIn}대)`, { span: 7, bg: '#fef3c7', bold: true }),
+        c(String(g.secured), { bg: '#fef3c7', bold: true }), c(String(g.add), { bg: '#fef3c7', bold: true }), gb, c('-', { bg: '#fef3c7' })])
     }
-    L.push(['전체 합계', '', '', '', '', '', '', String(result.totalSecured), String(result.totalAdd),
-      result.finalShort > 0 ? `최종 부족 ${result.finalShort}대` : '부족 없음', ''])
-    await navigator.clipboard.writeText(L.map(r => r.join('\t')).join('\n'))
+    const fb: C = result.finalShort > 0
+      ? { t: `최종 부족 ${result.finalShort}대`, bg: '#e2e8f0', fg: '#dc2626', bold: true, align: 'center' }
+      : { t: '부족 없음', bg: '#e2e8f0', fg: '#059669', bold: true, align: 'center' }
+    rows.push([c('전체 합계 (확보/추가) · 최종 잔량', { span: 7, bg: '#e2e8f0', bold: true }),
+      c(String(result.totalSecured), { bg: '#e2e8f0', bold: true }), c(String(result.totalAdd), { bg: '#e2e8f0', bold: true }), fb, c('-', { bg: '#e2e8f0' })])
+
+    const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const widths = [150, 70, 70, 90, 90, 60, 130, 70, 100, 100, 150]
+    const html = '<table style="border-collapse:collapse;font-family:Malgun Gothic,sans-serif;font-size:11pt">'
+      + '<colgroup>' + widths.map(w => `<col width="${w}">`).join('') + '</colgroup>'
+      + rows.map(r => '<tr>' + r.map(x =>
+        `<td${x.span ? ` colspan="${x.span}"` : ''} style="border:1px solid #000;padding:3px 6px;text-align:${x.align || 'left'};`
+        + `${x.bg ? `background:${x.bg};` : ''}${x.fg ? `color:${x.fg};` : ''}${x.bold ? 'font-weight:bold;' : ''}">${esc(x.t)}</td>`).join('') + '</tr>').join('')
+      + '</table>'
+    // 텍스트판: 병합된 칸 뒤는 빈 칸으로 채워 11열을 항상 맞춘다
+    const text = rows.map(r => r.flatMap(x => [x.t, ...Array((x.span || 1) - 1).fill('')]).slice(0, NCOL).join('\t')).join('\n')
+
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      })])
+    } catch {
+      await navigator.clipboard.writeText(text)   // HTML 복사를 막는 환경이면 텍스트만
+    }
+    setCopied(true); setTimeout(() => setCopied(false), 1800)
   }
 
   return (
@@ -220,7 +255,7 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
             <div>
               <div className="text-xs font-bold text-slate-700 mb-1">
                 ② 결과표 <span className="font-normal text-slate-400">— 아래 부킹 표에서 모선(행)의 체크박스를 선택하세요 (여러 개 가능)</span>
-                {result && <button type="button" onClick={copyTsv} className="ml-3 px-2 py-0.5 border border-slate-300 rounded hover:bg-slate-50 font-normal">표 복사 (TSV)</button>}
+                {result && <button type="button" onClick={copyTable} className="ml-3 px-2 py-0.5 border border-slate-300 rounded hover:bg-slate-50 font-normal">{copied ? '복사됨 ✓' : '표 복사 (엑셀/워드 붙여넣기용)'}</button>}
               </div>
 
               {picked.length === 0 && (
