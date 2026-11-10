@@ -114,7 +114,14 @@ export function joinDests(list: string[]): string {
   for (const d of list.map(x => (x || '').trim()).filter(Boolean)) {
     if (!out.some(x => x.toUpperCase() === d.toUpperCase())) out.push(d)
   }
+  // 입력 순서와 무관하게 항상 오름차순 — "A & B"와 "B & A"를 같은 값으로 취급
+  out.sort((a, b) => a.localeCompare(b, 'ko'))
   return out.join(DEST_SEP)
+}
+
+// 저장 직전 정규화: 중복 제거 + 오름차순
+export function normalizeDests(v: string | null | undefined): string {
+  return joinDests(splitDests(v))
 }
 
 // pinnedColumns 기준으로 sticky left 오프셋 계산 (colWidths 반영)
@@ -2074,6 +2081,10 @@ export default function BookingTable({
         if (Array.isArray(d.booking_entries) && (d.booking_entries as BookingEntry[]).length > 0) {
           d.booking_no = (d.booking_entries as BookingEntry[])[0].no
         }
+        // 최종도착지는 항상 오름차순으로 저장
+        if (typeof d.final_destination === 'string') {
+          d.final_destination = normalizeDests(d.final_destination as string)
+        }
         return d
       }
       const editsToSave = editEntries.map(([id, edits]) => ({ id, data: prepData(edits as Record<string, unknown>) }))
@@ -2142,7 +2153,7 @@ export default function BookingTable({
     const v = value.trim()
     const dateVal = normalizeDateInput(v)
     switch (col) {
-      case 'final_destination': return { final_destination: v }
+      case 'final_destination': return { final_destination: normalizeDests(v) }
       case 'discharge_port': return { discharge_port: v }
       case 'carrier': return { carrier: v }
       case 'vessel_name': return { vessel_name: v.toUpperCase() }
