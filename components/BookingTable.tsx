@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { differenceInCalendarDays, parseISO, isValid, format, addDays } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import type { EtdHint } from '@/lib/etd-hint'
+import type { DocHint } from '@/lib/one-doc'
 import type { Booking, Profile, CustomList, ColumnDefinition, BookingEntry, TableStyle } from '@/types'
 import { DEFAULT_COLUMN_ORDER, DEFAULT_PINNED_COLUMNS, CARRIERS, MAJOR_PORTS, DEFAULT_DESTINATIONS, DEFAULT_TABLE_STYLE } from '@/types'
 import { deleteBooking, saveColumnOrder, bulkSaveBookings, bulkDeleteBookings } from '@/app/bookings/actions'
@@ -957,7 +958,33 @@ function AutocompleteInput({ value, options, onChange, placeholder, className, a
 
 // ── 편집 셀 ───────────────────────────────────────────────────────
 
-function EditCell({ colKey, row, profiles, destinations, ports, carriers, customColumns, onChange, autoFocus, transitDays }: {
+function EtdBadge({ h }: { h: EtdHint }) {
+  return (
+    <span title={h.tip}
+      className={`flex-shrink-0 text-[10px] leading-none px-1 py-0.5 rounded font-bold cursor-help ${
+        h.diff > 0 ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>
+      {h.diff > 0 ? '+' : ''}{h.diff}{h.n > 1 ? '?' : ''}
+    </span>
+  )
+}
+
+// ONE 마감표 대비 서류마감 표시: 차이(+N/-N) · 같음(✓) · 마감 · 미정 · 미조회(못 가져옴)를 서로 다른 색으로 구분
+function DocBadge({ h }: { h: DocHint }) {
+  const cls =
+    h.kind === 'diff' ? (h.diff! > 0 ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700')
+    : h.kind === 'same' ? 'bg-emerald-50 text-emerald-600'
+    : h.kind === 'notfound' ? 'bg-amber-100 text-amber-800 border border-amber-300'
+    : h.kind === 'fill' ? 'bg-violet-100 text-violet-700'
+    : 'bg-slate-100 text-slate-500'
+  return (
+    <span title={h.tip} className={`flex-shrink-0 text-[10px] leading-none px-1 py-0.5 rounded font-bold cursor-help ${cls}`}>
+      {h.label}
+    </span>
+  )
+}
+
+function EditCell({ colKey, row, profiles, destinations, ports, carriers, customColumns, onChange, autoFocus, transitDays, etdHint, docHint }: {
+  etdHint?: EtdHint | null; docHint?: DocHint | null
   colKey: string; row: Partial<Booking>; profiles: Profile[]
   destinations: string[]; ports: string[]; carriers: string[]
   customColumns: ColumnDefinition[]
@@ -1035,6 +1062,7 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
               {di.label}{di.holiday ? '·휴' : ''}
             </span>
           )}
+          {docHint && <DocBadge h={docHint} />}
         </div>
       )
     }
@@ -1044,9 +1072,14 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
         onChange={e => { const v = e.target.value || null; onChange({ proforma_etd: v, ...withEta(v) }) }}
         onBlur={e => { const v = normalizeDateInput(e.target.value); onChange({ proforma_etd: v, ...withEta(v) }) }} />
     case 'updated_etd':
-      return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.updated_etd || ''}
-        onChange={e => onChange(withEta(e.target.value || null))}
-        onBlur={e => onChange(withEta(normalizeDateInput(e.target.value)))} />
+      return (
+        <div className="flex items-center gap-1 w-full">
+          <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={`${cls} flex-1 min-w-0`} value={row.updated_etd || ''}
+            onChange={e => onChange(withEta(e.target.value || null))}
+            onBlur={e => onChange(withEta(normalizeDateInput(e.target.value)))} />
+          {etdHint && <EtdBadge h={etdHint} />}
+        </div>
+      )
     case 'eta':
       return <input autoFocus={autoFocus} type="text" placeholder="YYYY-MM-DD" className={cls} value={row.eta || ''} onChange={e => onChange({ eta: e.target.value || null })} onBlur={e => onChange({ eta: normalizeDateInput(e.target.value) })} />
     case 'handler_region':
@@ -1084,8 +1117,8 @@ function EditCell({ colKey, row, profiles, destinations, ports, carriers, custom
 
 // ── 뷰 셀 ─────────────────────────────────────────────────────────
 
-function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorMap = {}, etdHint }: {
-  etdHint?: EtdHint | null
+function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorMap = {}, etdHint, docHint }: {
+  etdHint?: EtdHint | null; docHint?: DocHint | null
   colKey: string; booking: Booking; currentUserId: string; customColumns: ColumnDefinition[]; carrierColorMap?: Record<string, string>
 }) {
   switch (colKey) {
@@ -1143,10 +1176,13 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
       const dow = getDayOfWeek(booking.doc_cutoff_date)
       const weekendCls = dow.isWeekend ? 'bg-red-200 text-red-800 font-bold' : ''
       return (
-        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${weekendCls || dc}`}>
-          {fmtDate(booking.doc_cutoff_date)}
-          {dow.label && <span className={dow.isWeekend ? 'font-bold' : 'opacity-75'}>({dow.label})</span>}
-          {dl && <span className="opacity-60 text-[10px]">{dl}</span>}
+        <span className="inline-flex items-center gap-1">
+          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${weekendCls || dc}`}>
+            {fmtDate(booking.doc_cutoff_date)}
+            {dow.label && <span className={dow.isWeekend ? 'font-bold' : 'opacity-75'}>({dow.label})</span>}
+            {dl && <span className="opacity-60 text-[10px]">{dl}</span>}
+          </span>
+          {docHint && <DocBadge h={docHint} />}
         </span>
       )
     }
@@ -1162,13 +1198,7 @@ function ViewCell({ colKey, booking, currentUserId, customColumns, carrierColorM
       return (
         <span className="inline-flex items-center gap-1">
           <span className={`text-xs ${getEtdClass(booking.updated_etd)}`}>{fmtDate(booking.updated_etd)}</span>
-          {etdHint && (
-            <span title={etdHint.tip}
-              className={`text-[10px] leading-none px-1 py-0.5 rounded font-bold cursor-help ${
-                etdHint.diff > 0 ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>
-              {etdHint.diff > 0 ? '+' : ''}{etdHint.diff}{etdHint.n > 1 ? '?' : ''}
-            </span>
-          )}
+          {etdHint && <EtdBadge h={etdHint} />}
         </span>
       )
     case 'eta':
@@ -1254,6 +1284,8 @@ interface Props {
   tableStyle?: TableStyle
   etaTransitDays?: TransitMap
   etdHints?: Record<string, EtdHint>   // 터미널 스케줄 대비 ETD 차이(+3 표시용)
+  etdHintFor?: (row: Partial<Booking>) => EtdHint | null   // 편집 중 값 기준(실시간)
+  docHintFor?: (row: Partial<Booking>) => DocHint | null    // ONE 마감표 대비 서류마감
   onSettingsClick?: () => void
 }
 
@@ -1269,6 +1301,8 @@ export default function BookingTable({
   tableStyle = DEFAULT_TABLE_STYLE,
   etaTransitDays = {},
   etdHints = {},
+  etdHintFor,
+  docHintFor,
   onSettingsClick,
 }: Props) {
   const router = useRouter()
@@ -2556,8 +2590,8 @@ export default function BookingTable({
               }}>
               <div style={colWidths[col] ? { width: Math.max(16, colWidths[col] - 18), overflow: 'hidden' } : undefined}>
               {canEditCell
-                ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} transitDays={transitDays} />
-                : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} etdHint={etdHints[booking.id] || null} />
+                ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} transitDays={transitDays} etdHint={etdHintFor ? etdHintFor(merged) : null} docHint={docHintFor ? docHintFor(merged) : null} />
+                : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} etdHint={etdHints[booking.id] || null} docHint={docHintFor ? docHintFor(booking) : null} />
               }
               {col === 'booking_no' && !canEditCell && groupMap[booking.id] && (
                 <button

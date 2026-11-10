@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import BookingTable from './BookingTable'
 import DocCutoffTab from './DocCutoffTab'
@@ -13,6 +13,7 @@ import { signOut } from '@/app/bookings/actions'
 import type { EtdHintCand } from '@/app/bookings/etdSyncActions'
 import { normVessel } from '@/lib/terminal-schedule'
 import { bestHint, type EtdHint } from '@/lib/etd-hint'
+import { buildOneDocIndex, oneDocHint, type OneDocRow, type DocHint } from '@/lib/one-doc'
 import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS, CARRIERS } from '@/types'
 
@@ -164,25 +165,50 @@ export default function BookingPageLayout({
     }, 800)
     return () => { clearTimeout(timer); if (!done) { ctl.abort(); release() } }
   }, [vesselKey])
-  const etdHints = useMemo(() => {
+  const todayKst = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+  const etdHintFor = useCallback((b: Partial<Booking>): EtdHint | null => {
+    if (!b.updated_etd || !b.vessel_name || b.updated_etd < todayKst()) return null
+    const all = vesselCands[normVessel(b.vessel_name)]
+    if (!all) return null
     const prefs = currentProfile?.etd_terminal_prefs || {}
     const toMs = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return Date.UTC(y, m - 1, dd) }
+    const cur = toMs(b.updated_etd)
+    const near = all
+      .filter(c => Math.abs((toMs(c.e) - cur) / 86400000) <= 21)
+      .sort((x, y) => Math.abs(toMs(x.e) - cur) - Math.abs(toMs(y.e) - cur))
+      .slice(0, 8)
+    if (near.length === 0) return null
+    return bestHint(b.updated_etd, near, prefs[(b.carrier || '').trim().toUpperCase()] || [])
+  }, [vesselCands, currentProfile])
+  const etdHints = useMemo(() => {
     const out: Record<string, EtdHint> = {}
     for (const b of bookings) {
-      if (!b.updated_etd || !b.vessel_name) continue
-      const all = vesselCands[normVessel(b.vessel_name)]
-      if (!all) continue
-      const cur = toMs(b.updated_etd)
-      const near = all
-        .filter(c => Math.abs((toMs(c.e) - cur) / 86400000) <= 21)
-        .sort((x, y) => Math.abs(toMs(x.e) - cur) - Math.abs(toMs(y.e) - cur))
-        .slice(0, 8)
-      if (near.length === 0) continue
-      const h = bestHint(b.updated_etd, near, prefs[(b.carrier || '').trim().toUpperCase()] || [])
+      const h = etdHintFor(b)
       if (h) out[b.id] = h
     }
     return out
-  }, [bookings, vesselCands, currentProfile])
+  }, [bookings, etdHintFor])
+
+  // ── ONE 서류마감(DOC/VGM) 대비 차이: 수집 서버가 2시간마다 갱신 → 화면은 30분마다 다시 읽음 ──
+  const [oneDocRows, setOneDocRows] = useState<OneDocRow[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    const load = () => fetch('/api/one-doc', { cache: 'no-store' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { if (alive && j?.rows) setOneDocRows(j.rows) })
+      .catch(() => {})
+    load()
+    const t = setInterval(load, 30 * 60 * 1000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  const oneDocIdx = useMemo(() => (oneDocRows ? buildOneDocIndex(oneDocRows) : null), [oneDocRows])
+  const docHintFor = useCallback((b: Partial<Booking>): DocHint | null => {
+    if (!oneDocIdx) return null    // 아직 못 불러왔으면 표시하지 않음(미조회와 구분)
+    return oneDocHint({
+      carrier: b.carrier || '', vessel_name: b.vessel_name || '', voyage: b.voyage || '',
+      doc_cutoff_date: b.doc_cutoff_date || null, updated_etd: b.updated_etd || null, proforma_etd: b.proforma_etd || null,
+    }, oneDocIdx, todayKst())
+  }, [oneDocIdx])
   // 설정(최종도착지 목록) 기준 — 도착지 등록 후보로 사용
   const destinationOptions = (() => {
     const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
@@ -328,6 +354,8 @@ export default function BookingPageLayout({
                 tableStyle={currentProfile?.table_style || DEFAULT_TABLE_STYLE}
                 etaTransitDays={etaTransitDays}
                 etdHints={etdHints}
+                etdHintFor={etdHintFor}
+                docHintFor={docHintFor}
               />
             </div>
           )}
