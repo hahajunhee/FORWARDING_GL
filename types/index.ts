@@ -42,7 +42,6 @@ export interface Profile {
   pinned_columns: string[] | null
   vessel_prefs?: VesselPrefs | null
   etd_terminal_prefs?: Record<string, string[]> | null  // 선사 → 기본 터미널 (ETD 확인 탭)
-  capacity_map?: { pdc: Record<string, string[]>; carrier: Record<string, string[]> } | null  // 예상선복확인: PDC↔최종도착지, 미선적선사↔부킹선사
   doc_template: string | null
   color: string | null
   region: string | null

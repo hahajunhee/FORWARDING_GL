@@ -1287,6 +1287,7 @@ interface Props {
   etdHintFor?: (row: Partial<Booking>) => EtdHint | null   // 편집 중 값 기준(실시간)
   docHintFor?: (row: Partial<Booking>) => DocHint | null    // ONE 마감표 대비 서류마감(편집 중 실시간)
   docHints?: Record<string, DocHint>                        // 보기용 미리 계산값
+  onSelectionChange?: (ids: Set<string>) => void            // 행 체크박스 선택 변경 알림(예상선복확인용)
   onSettingsClick?: () => void
 }
 
@@ -1305,6 +1306,7 @@ export default function BookingTable({
   etdHintFor,
   docHintFor,
   docHints = {},
+  onSelectionChange,
   onSettingsClick,
 }: Props) {
   const router = useRouter()
@@ -1348,6 +1350,7 @@ export default function BookingTable({
   const [newRows, setNewRows] = useState<NewRow[]>([])
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
+  useEffect(() => { onSelectionChange?.(selectedRows) }, [selectedRows]) // eslint-disable-line react-hooks/exhaustive-deps
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [bulkClosing, setBulkClosing] = useState(false)
   const [bulkEditOpen, setBulkEditOpen] = useState(false)

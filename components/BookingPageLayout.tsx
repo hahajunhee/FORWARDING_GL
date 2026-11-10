@@ -143,6 +143,7 @@ export default function BookingPageLayout({
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
   const [sidebarOpen, setSidebarOpen] = useState(false) // 모바일 드로어
+  const [capSelected, setCapSelected] = useState<Set<string>>(new Set()) // 예상선복확인: 표에서 체크한 부킹
 
   const pinnedColumns = currentProfile?.pinned_columns || DEFAULT_PINNED_COLUMNS
 
@@ -359,7 +360,7 @@ export default function BookingPageLayout({
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {(activeTab === 'bookings' || activeTab === 'capacity') && (
             <div className="flex-1 min-h-0 flex flex-col p-2 md:p-4">
-              {activeTab === 'capacity' && <CapacityPanel bookings={bookings} currentProfile={currentProfile} />}
+              {activeTab === 'capacity' && <CapacityPanel bookings={bookings} selectedIds={capSelected} />}
               <BookingTable
                 key={activeTab}
                 bookings={bookings}
@@ -380,6 +381,7 @@ export default function BookingPageLayout({
                 etdHintFor={etdHintFor}
                 docHintFor={docHintFor}
                 docHints={docHints}
+                onSelectionChange={activeTab === 'capacity' ? setCapSelected : undefined}
               />
             </div>
           )}
