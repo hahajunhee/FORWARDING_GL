@@ -9,6 +9,7 @@ import ScheduleNewTab from './ScheduleNewTab'
 import SecuredSpaceTab from './SecuredSpaceTab'
 import CutoffEtdTab from './CutoffEtdTab'
 import EtdSyncTab from './EtdSyncTab'
+import CapacityPanel from './CapacityPanel'
 import { signOut } from '@/app/bookings/actions'
 import type { EtdHintCand } from '@/app/bookings/etdSyncActions'
 import { normVessel } from '@/lib/terminal-schedule'
@@ -358,6 +359,7 @@ export default function BookingPageLayout({
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {(activeTab === 'bookings' || activeTab === 'capacity') && (
             <div className="flex-1 min-h-0 flex flex-col p-2 md:p-4">
+              {activeTab === 'capacity' && <CapacityPanel bookings={bookings} currentProfile={currentProfile} />}
               <BookingTable
                 key={activeTab}
                 bookings={bookings}
