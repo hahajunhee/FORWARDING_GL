@@ -15,6 +15,11 @@ export interface DocHint {
   tip: string         // 마우스 올렸을 때 설명
 }
 
+function shiftDay(d: string, n: number): string {
+  const [y, m, dd] = d.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10)
+}
+
 const norm = (s: string | null | undefined) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
 
 export function buildOneDocIndex(rows: OneDocRow[]): Map<string, OneDocRow[]> {
@@ -56,10 +61,19 @@ export function oneDocHint(b: B, idx: Map<string, OneDocRow[]>, today: string): 
   const head = `ONE ${row.vessel} ${row.voyage}  ETD ${row.etd || '-'}`
   if (row.doc_date) {
     const when = `${row.doc_date}${row.doc_time ? ' ' + row.doc_time : ''}`
-    if (!b.doc_cutoff_date) return { kind: 'fill', label: row.doc_date.slice(5), tip: `${head}\n사이트 DOC/VGM 마감: ${when}\n(부킹장 서류마감이 비어 있습니다)` }
-    const diff = dayDiff(b.doc_cutoff_date, row.doc_date)
-    if (diff === 0) return { kind: 'same', label: '✓', tip: `${head}\n사이트 DOC/VGM 마감: ${when}\n부킹장 서류마감과 같습니다.` }
-    return { kind: 'diff', diff, label: `${diff > 0 ? '+' : ''}${diff}`, tip: `${head}\n사이트 DOC/VGM 마감: ${when}\n부킹장 ${b.doc_cutoff_date} 대비 ${diff > 0 ? '+' : ''}${diff}일` }
+    // 사이트 DOC/VGM 마감 당일이 아니라 하루 전이 실제 서류마감일이므로 -1일 해서 비교
+    const target = shiftDay(row.doc_date, -1)
+    const note = `사이트 DOC/VGM 마감: ${when}  →  실제 서류마감(하루 전): ${target}`
+    if (!b.doc_cutoff_date) return { kind: 'fill', label: target.slice(5), tip: `${head}
+${note}
+(부킹장 서류마감이 비어 있습니다)` }
+    const diff = dayDiff(b.doc_cutoff_date, target)
+    if (diff === 0) return { kind: 'same', label: '✓', tip: `${head}
+${note}
+부킹장 서류마감과 같습니다.` }
+    return { kind: 'diff', diff, label: `${diff > 0 ? '+' : ''}${diff}`, tip: `${head}
+${note}
+부킹장 ${b.doc_cutoff_date} 대비 ${diff > 0 ? '+' : ''}${diff}일` }
   }
   if ((row.doc_raw || '').includes('마감')) return { kind: 'closed', label: '마감', tip: `${head}\n사이트에서 이미 "마감" 처리된 모선입니다.` }
   return { kind: 'pending', label: '미정', tip: `${head}\n사이트: ${row.doc_raw || '마감시간 미공지'}` }
