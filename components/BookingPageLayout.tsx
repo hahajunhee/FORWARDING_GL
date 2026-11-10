@@ -17,7 +17,7 @@ import { buildOneDocIndex, oneDocHint, type OneDocRow, type DocHint } from '@/li
 import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup } from '@/types'
 import { DEFAULT_PINNED_COLUMNS, DEFAULT_TABLE_STYLE, DEFAULT_DESTINATIONS, CARRIERS } from '@/types'
 
-type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'cutoff_etd' | 'etd_sync'
+type Tab = 'bookings' | 'doc_cutoff' | 'reefer_cutoff' | 'schedule_new' | 'secured' | 'cutoff_etd' | 'etd_sync' | 'capacity'
 
 interface Props {
   bookings: Booking[]
@@ -97,6 +97,17 @@ const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = 
     ),
   },
   {
+    key: 'capacity',
+    label: '예상선복확인',
+    sub: '부킹장 + 선복 확인',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M3 7h18M3 7l2 12h14l2-12M3 7l3-4h12l3 4M9 11v4m3-4v4m3-4v4" />
+      </svg>
+    ),
+  },
+  {
     key: 'schedule_new',
     label: '주요 스케줄(new)',
     sub: '고객사 송부 양식',
@@ -166,8 +177,10 @@ export default function BookingPageLayout({
     return () => { clearTimeout(timer); if (!done) { ctl.abort(); release() } }
   }, [vesselKey])
   const todayKst = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' })
+  // 날짜는 렌더마다 다시 계산하지 않고 한 번만(자정 지나면 새로고침 시 갱신)
+  const todayStr = useMemo(() => todayKst(), [])
   const etdHintFor = useCallback((b: Partial<Booking>): EtdHint | null => {
-    if (!b.updated_etd || !b.vessel_name || b.updated_etd < todayKst()) return null
+    if (!b.updated_etd || !b.vessel_name || b.updated_etd < todayStr) return null
     const all = vesselCands[normVessel(b.vessel_name)]
     if (!all) return null
     const prefs = currentProfile?.etd_terminal_prefs || {}
@@ -179,7 +192,7 @@ export default function BookingPageLayout({
       .slice(0, 8)
     if (near.length === 0) return null
     return bestHint(b.updated_etd, near, prefs[(b.carrier || '').trim().toUpperCase()] || [])
-  }, [vesselCands, currentProfile])
+  }, [vesselCands, currentProfile, todayStr])
   const etdHints = useMemo(() => {
     const out: Record<string, EtdHint> = {}
     for (const b of bookings) {
@@ -207,8 +220,15 @@ export default function BookingPageLayout({
     return oneDocHint({
       carrier: b.carrier || '', vessel_name: b.vessel_name || '', voyage: b.voyage || '',
       doc_cutoff_date: b.doc_cutoff_date || null, updated_etd: b.updated_etd || null, proforma_etd: b.proforma_etd || null,
-    }, oneDocIdx, todayKst())
-  }, [oneDocIdx])
+    }, oneDocIdx, todayStr)
+  }, [oneDocIdx, todayStr])
+  // 보기용은 미리 한 번만 계산(셀을 그릴 때마다 계산하면 편집이 느려짐). 편집 중인 행만 docHintFor로 실시간 계산.
+  const docHints = useMemo(() => {
+    const out: Record<string, DocHint> = {}
+    if (!oneDocIdx) return out
+    for (const b of bookings) { const h = docHintFor(b); if (h) out[b.id] = h }
+    return out
+  }, [bookings, oneDocIdx, docHintFor])
   // 설정(최종도착지 목록) 기준 — 도착지 등록 후보로 사용
   const destinationOptions = (() => {
     const c = customLists.filter(l => l.list_type === 'destination').map(l => l.name)
@@ -336,9 +356,10 @@ export default function BookingPageLayout({
 
         {/* 메인 컨텐츠 */}
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
-          {activeTab === 'bookings' && (
+          {(activeTab === 'bookings' || activeTab === 'capacity') && (
             <div className="flex-1 min-h-0 flex flex-col p-2 md:p-4">
               <BookingTable
+                key={activeTab}
                 bookings={bookings}
                 profiles={profiles}
                 currentUserId={currentUserId}
@@ -356,6 +377,7 @@ export default function BookingPageLayout({
                 etdHints={etdHints}
                 etdHintFor={etdHintFor}
                 docHintFor={docHintFor}
+                docHints={docHints}
               />
             </div>
           )}

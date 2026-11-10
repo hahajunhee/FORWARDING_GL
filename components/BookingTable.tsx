@@ -1285,7 +1285,8 @@ interface Props {
   etaTransitDays?: TransitMap
   etdHints?: Record<string, EtdHint>   // 터미널 스케줄 대비 ETD 차이(+3 표시용)
   etdHintFor?: (row: Partial<Booking>) => EtdHint | null   // 편집 중 값 기준(실시간)
-  docHintFor?: (row: Partial<Booking>) => DocHint | null    // ONE 마감표 대비 서류마감
+  docHintFor?: (row: Partial<Booking>) => DocHint | null    // ONE 마감표 대비 서류마감(편집 중 실시간)
+  docHints?: Record<string, DocHint>                        // 보기용 미리 계산값
   onSettingsClick?: () => void
 }
 
@@ -1303,6 +1304,7 @@ export default function BookingTable({
   etdHints = {},
   etdHintFor,
   docHintFor,
+  docHints = {},
   onSettingsClick,
 }: Props) {
   const router = useRouter()
@@ -2591,7 +2593,7 @@ export default function BookingTable({
               <div style={colWidths[col] ? { width: Math.max(16, colWidths[col] - 18), overflow: 'hidden' } : undefined}>
               {canEditCell
                 ? <EditCell colKey={col} row={merged} profiles={profiles} destinations={destinations} ports={ports} carriers={carriers} customColumns={customColumns} onChange={c => handleRowChange(booking.id, c)} autoFocus={isActive} transitDays={transitDays} etdHint={etdHintFor ? etdHintFor(merged) : null} docHint={docHintFor ? docHintFor(merged) : null} />
-                : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} etdHint={etdHints[booking.id] || null} docHint={docHintFor ? docHintFor(booking) : null} />
+                : <ViewCell colKey={col} booking={booking} currentUserId={currentUserId} customColumns={customColumns} carrierColorMap={carrierColorMap} etdHint={etdHints[booking.id] || null} docHint={docHints[booking.id] || null} />
               }
               {col === 'booking_no' && !canEditCell && groupMap[booking.id] && (
                 <button
