@@ -190,14 +190,16 @@ export async function saveScheduleDestGroups(
 
 // ── 서류마감: 레일 구간 최종도착지 저장 (전체 공유) ─────────────────
 
-export async function saveRailDests(dests: string[]): Promise<{ error: string | null }> {
+export async function saveRailDests(
+  notes: Record<string, string>
+): Promise<{ error: string | null }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
 
   const { error } = await supabase
     .from('global_settings')
-    .upsert({ key: 'rail_dests', value: dests })
+    .upsert({ key: 'rail_dests', value: notes })
 
   if (error) return { error: error.message }
   revalidatePath('/bookings')

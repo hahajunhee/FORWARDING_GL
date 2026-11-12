@@ -48,7 +48,7 @@ function destWithTeamTruck(b: Booking, dests: string[]): string {
 
 // 레일 구간으로 등록된 도착지는 별도 줄로 분리한다.
 // 예: 레일에 AURORA, IL 등록 → "AURORA, IL" 한 줄 + 나머지 도착지 한 줄
-function destLinesOf(b: Booking, teamTruckDests: string[], railDests: string[]): string[] {
+function destLinesOf(b: Booking, teamTruckDests: string[], railNotes: Record<string, string>): string[] {
   const raw = (b.final_destination || '').trim()
   const mark = (d: string) => {
     const tt = teamTruckDests.map(x => (x || '').trim().toUpperCase()).filter(Boolean)
@@ -56,14 +56,20 @@ function destLinesOf(b: Booking, teamTruckDests: string[], railDests: string[]):
   }
   const parts = splitDests(raw)
   if (parts.length === 0) return [raw || '-']
-  const rail = railDests.map(x => (x || '').trim().toUpperCase()).filter(Boolean)
-  const isRail = (d: string) => rail.includes(d.trim().toUpperCase())
+  const noteOf = new Map(
+    Object.entries(railNotes || {}).map(([k, v]) => [(k || '').trim().toUpperCase(), (v || '').trim()]))
+  const isRail = (d: string) => noteOf.has(d.trim().toUpperCase())
+  // 레일 도착지에 등록된 문구를 도착지명 뒤에 덧붙인다
+  const withNote = (d: string) => {
+    const note = noteOf.get(d.trim().toUpperCase())
+    return note ? `${mark(d)} ${note}` : mark(d)
+  }
 
   const entries: { pos: number; text: string }[] = []
   const rest: string[] = []
   let restPos = -1
   parts.forEach((p, i) => {
-    if (isRail(p)) entries.push({ pos: i, text: mark(p) })
+    if (isRail(p)) entries.push({ pos: i, text: withNote(p) })
     else { if (restPos < 0) restPos = i; rest.push(mark(p)) }
   })
   if (rest.length > 0) entries.push({ pos: restPos, text: rest.join(' & ') })
@@ -126,18 +132,19 @@ interface Props {
   profiles: Profile[]
   currentUserId: string
   initialTeamTruckDests?: string[]
-  initialRailDests?: string[]
+  initialRailNotes?: Record<string, string>
   destinationOptions?: string[]   // 설정에 등록된 최종도착지 목록
 }
 
 export default function DocCutoffTab({
   bookings, initialTemplate, customColumns, profiles, currentUserId,
-  initialTeamTruckDests = [], initialRailDests = [], destinationOptions = [],
+  initialTeamTruckDests = [], initialRailNotes = {}, destinationOptions = [],
 }: Props) {
   const [teamTruckDests, setTeamTruckDests] = useState<string[]>(initialTeamTruckDests)
   const [ttOpen, setTtOpen] = useState(false)
   const [ttSaveState, setTtSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
-  const [railDests, setRailDests] = useState<string[]>(initialRailDests)
+  const [railNotes, setRailNotes] = useState<Record<string, string>>(initialRailNotes)
+  const railDests = Object.keys(railNotes)
   const [railOpen, setRailOpen] = useState(false)
   const [railSaveState, setRailSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'))
@@ -179,7 +186,7 @@ export default function DocCutoffTab({
   const handleSaveRail = () => {
     setRailSaveState('saving')
     startTransition(async () => {
-      const { error } = await saveRailDests(railDests)
+      const { error } = await saveRailDests(railNotes)
       if (error) { setRailSaveState('error'); return }
       setRailSaveState('saved')
       setTimeout(() => setRailSaveState('idle'), 2500)
@@ -233,7 +240,7 @@ export default function DocCutoffTab({
 
     // 레일 구간이 등록된 도착지는 별도 번호로 분리 (부킹 정보는 동일하게 사용)
     const expanded = rows.flatMap(b =>
-      destLinesOf(b, teamTruckDests, railDests).map(destText => ({ b, destText })))
+      destLinesOf(b, teamTruckDests, railNotes).map(destText => ({ b, destText })))
 
     // {부킹목록} - 전체 합친 목록
     const combinedList = expanded.map((x, i) => {
@@ -472,12 +479,16 @@ export default function DocCutoffTab({
           </div>
           <div className="flex flex-wrap gap-1.5">
             {allDestinations.map(d => {
-              const on = railDests.some(x => x.trim().toUpperCase() === d.trim().toUpperCase())
+              const key = Object.keys(railNotes).find(x => x.trim().toUpperCase() === d.trim().toUpperCase())
+              const on = !!key
               return (
                 <button key={d}
-                  onClick={() => setRailDests(prev => on
-                    ? prev.filter(x => x.trim().toUpperCase() !== d.trim().toUpperCase())
-                    : [...prev, d])}
+                  onClick={() => setRailNotes(prev => {
+                    const next = { ...prev }
+                    if (key) delete next[key]
+                    else next[d] = ''
+                    return next
+                  })}
                   className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
                     on ? 'bg-sky-500 text-white border-sky-500 font-medium'
                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
@@ -486,6 +497,25 @@ export default function DocCutoffTab({
             })}
             {allDestinations.length === 0 && <span className="text-xs text-gray-400">등록된 최종도착지가 없습니다.</span>}
           </div>
+
+          {railDests.length > 0 && (
+            <div className="pt-2 border-t border-gray-100 space-y-1.5">
+              <p className="text-xs text-gray-500 font-medium">도착지별 추가 문구 (선택)</p>
+              {railDests.map(d => (
+                <div key={d} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-700 w-40 flex-shrink-0 truncate" title={d}>{d}</span>
+                  <input value={railNotes[d] || ''}
+                    onChange={e => setRailNotes(prev => ({ ...prev, [d]: e.target.value }))}
+                    placeholder="예: ( ★ 철송건으로 마감전 선사구간 확인필요 ★ ,FDS : USCHI )"
+                    className="flex-1 text-xs border border-gray-200 rounded-lg px-2 py-1.5" />
+                </div>
+              ))}
+              <p className="text-[11px] text-gray-400">
+                입력한 문구는 메일 초안에서 해당 도착지 뒤에 그대로 붙습니다.
+                예: <code className="bg-gray-100 px-1 rounded">2. AURORA, IL ( ★ … ) / PRESIDENT GRANT …</code>
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -512,7 +542,7 @@ export default function DocCutoffTab({
 
                 {/* 포함 부킹 목록 */}
                 <div className="bg-gray-50 rounded-lg p-2.5 space-y-1">
-                  {rows.flatMap(b => destLinesOf(b, teamTruckDests, railDests).map(destText => ({ b, destText })))
+                  {rows.flatMap(b => destLinesOf(b, teamTruckDests, railNotes).map(destText => ({ b, destText })))
                     .map(({ b, destText }, i) => (
                     <div key={`${b.id}_${i}`} className="flex items-start gap-2 text-xs">
                       <span className="text-gray-400 w-4 flex-shrink-0 pt-0.5">{i + 1}.</span>

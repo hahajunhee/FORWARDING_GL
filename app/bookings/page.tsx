@@ -5,6 +5,19 @@ import type { Booking, Profile, CustomList, ColumnDefinition, ScheduleDestGroup 
 
 export const dynamic = 'force-dynamic'
 
+// 레일 설정: 구버전(도착지 배열) → 도착지별 문구 맵으로 정규화
+function normalizeRailNotes(v: unknown): Record<string, string> {
+  if (Array.isArray(v)) return Object.fromEntries((v as string[]).filter(Boolean).map(d => [d, '']))
+  if (v && typeof v === 'object') {
+    const out: Record<string, string> = {}
+    for (const [k, note] of Object.entries(v as Record<string, unknown>)) {
+      if (k) out[k] = typeof note === 'string' ? note : ''
+    }
+    return out
+  }
+  return {}
+}
+
 export default async function BookingsPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -110,7 +123,7 @@ export default async function BookingsPage() {
       securedBases={(securedBaseSetting?.value as Record<string, { mqc: number; secured: number }> | null) || {}}
       teamTruckDests={(teamTruckSetting?.value as string[] | null) || []}
       etaTransitDays={(etaTransitSetting?.value as Record<string, number> | null) || {}}
-      railDests={(railSetting?.value as string[] | null) || []}
+      railNotes={normalizeRailNotes(railSetting?.value)}
       regionList={(regionSetting?.value as string[] | null) || []}
       customerList={(customerSetting?.value as string[] | null) || []}
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}
