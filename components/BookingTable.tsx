@@ -1433,7 +1433,7 @@ export default function BookingTable({
   cellSelEndRef.current = cellSelEnd
   const isMouseSelecting = useRef(false)
   const [isDragSelecting, setIsDragSelecting] = useState(false)
-  const [hideClosed, setHideClosed] = useState(false) // 마감완료 행 숨기기
+  const [hideClosed, _setHideClosed] = useState(false) // 마감완료 행 숨기기 (localStorage 영속)
   const [copyWithHeaders, _setCopyWithHeaders] = useState(false)
   const copyWithHeadersRef = useRef(false)
   const setCopyWithHeaders = (v: boolean) => { _setCopyWithHeaders(v); copyWithHeadersRef.current = v }
@@ -1471,6 +1471,8 @@ export default function BookingTable({
       const bwf = localStorage.getItem('bk_blankWeekFrom'); if (bwf) _setBlankWeekFrom(Number(bwf))
       const bwt = localStorage.getItem('bk_blankWeekTo'); if (bwt) _setBlankWeekTo(Number(bwt))
       if (localStorage.getItem('bk_reeferSeparate') === 'true') _setReeferSeparate(true)
+      if (localStorage.getItem('bk_hideClosed') === 'true') _setHideClosed(true)
+      if (localStorage.getItem('bk_docFilter') === 'true') _setDocFilter(true)
       const storedSorts = localStorage.getItem('bk_sorts')
       if (storedSorts) _setSorts(JSON.parse(storedSorts))
       const storedWidths = localStorage.getItem('bk_col_widths')
@@ -1481,6 +1483,7 @@ export default function BookingTable({
   // 저장 헬퍼 + 래퍼 setter (사용자 조작 시에만 저장됨)
   const ls = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch {} }
   const setViewMode = (v: 'all' | 'mine') => { _setViewMode(v); ls('bk_viewMode', v) }
+  const setHideClosed = (v: boolean) => { _setHideClosed(v); ls('bk_hideClosed', String(v)) }
   const setCarrierFilter = (v: string) => { _setCarrierFilter(v); ls('bk_carrierFilter', v) }
   const setHandlerFilter = (v: string) => { _setHandlerFilter(v); ls('bk_handlerFilter', v) }
   const setEtdFrom = (v: string) => { _setEtdFrom(v); ls('bk_etdFrom', v) }
