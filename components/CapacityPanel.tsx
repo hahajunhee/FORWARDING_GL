@@ -304,7 +304,7 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
                     </table>
                   </div>
                   <div className="text-[11px] text-slate-400 mt-1">
-                    잔량 = 이월 + 추가 − 확보 (부족만 다음 모선으로 이월). 서류마감 이후에 발생하는 출하는 그 모선에 싣지 못하고 다음 모선 구간으로 넘어갑니다.
+                    잔량 = 이월 + 추가 − 확보 (부족만 다음 모선으로 이월). 계산구간은 <b>서류마감 전일</b>까지이며, 마감 당일 이후 발생하는 출하는 그 모선에 싣지 못하고 다음 모선 구간으로 넘어갑니다.
                     추가 = 하루 예상 출하 × 구간 영업일. 확보수량은 직접 고칠 수 있습니다.
                   </div>
                 </>

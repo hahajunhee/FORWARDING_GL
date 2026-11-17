@@ -23,6 +23,8 @@ export function unitQty(b: Booking): number {
 const ms = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return Date.UTC(y, m - 1, dd) }
 const ymd = (t: number) => new Date(t).toISOString().slice(0, 10)
 export const calDays = (a: string, b: string) => Math.round((ms(b) - ms(a)) / 86400000)
+/** 하루 전 날짜 (YYYY-MM-DD) */
+export const prevDay = (d: string) => ymd(ms(d) - 86400000)
 
 /** (from, to] 구간의 비휴일 일수 */
 export function workDays(from: string, to: string, holidays: Set<string>): number {
@@ -71,7 +73,7 @@ export interface CapResult {
 /**
  * 서류마감일 순으로 구간을 나눠, 구간 안에서 발생한 출하만 그 구간의 모선에 배정한다.
  *   잔량 = 이월 + 추가 − 확보  (양수=부족, 음수=여유). 부족만 다음 모선으로 이월된다.
- *   서류마감 이후에 발생한 출하는 그 모선에 못 싣는다(다음 구간 몫).
+ *   구간 끝은 서류마감 '전일' — 마감 당일 발생한 출하는 그 모선에 못 싣는다(다음 구간 몫).
  */
 export function calcSelection(opts: {
   rows: Booking[]; data: CapData; cells: Set<string>; mode: FcMode; qty?: Record<string, number>
@@ -90,8 +92,10 @@ export function calcSelection(opts: {
   let carry = initial, prev = data.today, totalSecured = 0, totalAdd = 0, spare = 0
   for (const cutoff of [...byCut.keys()].sort()) {
     const gr = byCut.get(cutoff)!.sort((a, b) => (a.updated_etd || a.proforma_etd || '').localeCompare(b.updated_etd || b.proforma_etd || ''))
-    const days = Math.max(0, calDays(prev, cutoff))
-    const wd = cutoff > prev ? workDays(prev, cutoff, hol) : 0
+    // 마감 당일 발생분은 싣지 못하므로 구간 끝을 마감 전일로 잡는다 (기존 9일 → 8일)
+    const end = prevDay(cutoff)
+    const days = Math.max(0, calDays(prev, end))
+    const wd = end > prev ? workDays(prev, end, hol) : 0
     const add = Math.round(perDay * wd)
     const secured = gr.reduce((s, b) => s + (opts.qty?.[b.id] ?? unitQty(b)), 0)
     const balance = carry + add - secured
@@ -99,7 +103,7 @@ export function calcSelection(opts: {
     totalSecured += secured; totalAdd += add
     if (balance < 0) spare += -balance
     carry = Math.max(balance, 0)
-    if (cutoff > prev) prev = cutoff
+    if (end > prev) prev = end
   }
   return { initial, perDay, pdcs, groups, totalSecured, totalAdd, finalShort: carry, finalSpare: spare, noCutoff, past }
 }
