@@ -13,6 +13,19 @@ export interface CapData {
 }
 
 export const cellKey = (pdc: string, carrier: string) => `${pdc}|${carrier}`
+
+/** 저장해두고 다시 불러오는 시뮬레이션 한 건 */
+export interface CapSim {
+  id: string
+  name: string
+  savedAt: string
+  bookingIds: string[]
+  cells: string[]
+  mode: FcMode
+  qty: Record<string, number>
+  addOverride: Record<string, number>
+  cutoffOffset: number
+}
 export type FcMode = 'pdc' | 'cells'   // 예상 출하 기준: 선택한 PDC 전체(모든 선사) / 선택한 칸만
 
 export function unitQty(b: Booking): number {
@@ -56,7 +69,8 @@ export interface CapGroup {
   days: number          // 계산구간(달력일)
   workDays: number      // 그중 비휴일
   carryIn: number       // 이월(앞 구간에서 못 태운 대수)
-  add: number           // 이 구간에 새로 발생하는 예상 출하
+  add: number           // 이 구간에 새로 발생하는 예상 출하 (사용자가 고쳤으면 그 값)
+  addAuto: number       // 자동 계산값 (하루 예상 출하 × 구간 영업일)
   secured: number       // 확보수량 합
   balance: number       // 이월+추가-확보  (+ 부족 / - 여유)
 }
@@ -81,7 +95,8 @@ export interface CapResult {
 export function calcSelection(opts: {
   rows: Booking[]; data: CapData; cells: Set<string>; mode: FcMode
   qty?: Record<string, number>
-  cutoffOffset?: number   // 0 ~ -3 (기본 -1: 마감 전일까지)
+  cutoffOffset?: number           // 0 ~ -3 (기본 -1: 마감 전일까지)
+  addOverride?: Record<string, number>   // 서류마감일 → 직접 지정한 '추가' 대수
 }): CapResult {
   const { rows, data, cells, mode } = opts
   const off = Math.min(0, Math.max(-3, Math.round(opts.cutoffOffset ?? -1)))
@@ -102,10 +117,12 @@ export function calcSelection(opts: {
     const end = shiftDay(cutoff, off)
     const days = Math.max(0, calDays(prev, end))
     const wd = end > prev ? workDays(prev, end, hol) : 0
-    const add = Math.round(perDay * wd)
+    const addAuto = Math.round(perDay * wd)
+    const ov = opts.addOverride?.[cutoff]
+    const add = typeof ov === 'number' && Number.isFinite(ov) ? Math.max(0, Math.round(ov)) : addAuto
     const secured = gr.reduce((s, b) => s + (opts.qty?.[b.id] ?? unitQty(b)), 0)
     const balance = carry + add - secured
-    groups.push({ cutoff, rows: gr, days, workDays: wd, carryIn: carry, add, secured, balance })
+    groups.push({ cutoff, rows: gr, days, workDays: wd, carryIn: carry, add, addAuto, secured, balance })
     totalSecured += secured; totalAdd += add
     if (balance < 0) spare += -balance
     carry = Math.max(balance, 0)

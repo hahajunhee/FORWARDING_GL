@@ -1,18 +1,22 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import type { Booking } from '@/types'
 import { formatContainers } from './BookingTable'
-import { calcSelection, cellKey, sumCells, unitQty, CUTOFF_OFFSETS, type CapData, type CapGroup, type FcMode } from '@/lib/capacity'
+import { calcSelection, cellKey, sumCells, unitQty, CUTOFF_OFFSETS, type CapData, type CapGroup, type CapSim, type FcMode } from '@/lib/capacity'
+import { saveCapacitySims } from '@/app/bookings/actions'
 
 const md = (d: string | null | undefined) => (d ? d.slice(5).replace('-', '/') : '-')
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString()
 
-function GroupRows({ g, qty, setQty }: {
+function GroupRows({ g, qty, setQty, addOv, setAddOv }: {
   g: CapGroup
   qty: Record<string, number>
   setQty: (f: (q: Record<string, number>) => Record<string, number>) => void
+  addOv: Record<string, number>
+  setAddOv: (f: (a: Record<string, number>) => Record<string, number>) => void
 }) {
+  const edited = typeof addOv[g.cutoff] === 'number'
   return (
     <>
       {g.rows.map(b => (
@@ -42,7 +46,20 @@ function GroupRows({ g, qty, setQty }: {
           </span>
         </td>
         <td>{g.secured}</td>
-        <td>{g.add}</td>
+        <td>
+          <span className="inline-flex items-center gap-1">
+            <input type="number" min={0}
+              className={`w-16 border rounded px-1 py-0.5 text-center ${edited ? 'border-amber-400 bg-amber-50 font-bold' : 'border-slate-300'}`}
+              value={g.add}
+              title={edited ? `자동 계산값 ${g.addAuto}대 — 직접 수정됨` : '직접 고칠 수 있습니다'}
+              onChange={e => setAddOv(a => ({ ...a, [g.cutoff]: Math.max(0, Number(e.target.value) || 0) }))} />
+            {edited && (
+              <button type="button" title={`자동값(${g.addAuto}대)으로 되돌리기`}
+                className="text-[10px] text-slate-400 hover:text-red-600"
+                onClick={() => setAddOv(a => { const n = { ...a }; delete n[g.cutoff]; return n })}>↺</button>
+            )}
+          </span>
+        </td>
         <td className={g.balance > 0 ? 'text-red-600' : 'text-emerald-600'}>
           {g.balance > 0 ? `부족 ${g.balance}대` : g.balance < 0 ? `여유 ${-g.balance}대` : '딱 맞음'}
         </td>
@@ -58,7 +75,12 @@ function GroupRows({ g, qty, setQty }: {
  *  ② 아래 부킹 표에서 체크한 모선(여러 개)만 대상으로
  *  ③ 서류마감 순으로 이월/추가(예상 출하)/확보를 계산해 잔량·부족을 보여준다
  */
-export default function CapacityPanel({ bookings, selectedIds }: { bookings: Booking[]; selectedIds: Set<string> }) {
+export default function CapacityPanel({ bookings, selectedIds, onSelectIds, initialSims = [] }: {
+  bookings: Booking[]
+  selectedIds: Set<string>
+  onSelectIds?: (ids: Set<string>) => void    // 시뮬레이션 불러올 때 표 체크 복원
+  initialSims?: CapSim[]
+}) {
   const [data, setData] = useState<CapData | null>(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
@@ -69,6 +91,11 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
   const [copied, setCopied] = useState(false)
   // 계산구간 끝 = 서류마감일 + 오프셋 (오전엔 -1, 오후엔 -2 식으로 조정)
   const [cutoffOffset, setCutoffOffset] = useState<number>(-1)
+  const [addOv, setAddOv] = useState<Record<string, number>>({})   // 마감일 → 직접 고친 '추가' 대수
+  const [sims, setSims] = useState<CapSim[]>(initialSims)
+  const [simId, setSimId] = useState('')
+  const [simMsg, setSimMsg] = useState('')
+  const [simSaving, startSim] = useTransition()
 
   // 마지막 선택 복원(이 브라우저에서만)
   useEffect(() => {
@@ -103,6 +130,66 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
     return { pdcs, carriers, has }
   }, [data])
 
+  // 시뮬레이션 저장/불러오기 — 체크한 모선, 선택 칸, 기준, 수정한 확보/추가 값까지 그대로 보관
+  const persistSims = (next: CapSim[], msg: string) => {
+    setSims(next)
+    setSimMsg('')
+    startSim(async () => {
+      const { error } = await saveCapacitySims(next)
+      setSimMsg(error ? `저장 실패: ${error}` : msg)
+      setTimeout(() => setSimMsg(''), 3000)
+    })
+  }
+
+  const saveSim = () => {
+    if (picked.length === 0) { alert('먼저 표에서 모선을 선택하세요.'); return }
+    const cur = sims.find(x => x.id === simId)
+    const name = window.prompt('시뮬레이션 이름', cur?.name || `${new Date().toISOString().slice(5, 10)} 시뮬레이션`)
+    if (name === null) return
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const sim: CapSim = {
+      id: cur && cur.name === trimmed ? cur.id : `sim_${Date.now()}`,
+      name: trimmed,
+      savedAt: new Date().toISOString(),
+      bookingIds: [...selectedIds],
+      cells: [...validCells],
+      mode,
+      qty,
+      addOverride: addOv,
+      cutoffOffset,
+    }
+    const next = [sim, ...sims.filter(x => x.id !== sim.id)].slice(0, 50)
+    setSimId(sim.id)
+    persistSims(next, `"${trimmed}" 저장됨`)
+  }
+
+  const loadSim = (id: string) => {
+    const sim = sims.find(x => x.id === id)
+    if (!sim) return
+    const exist = new Set(bookings.map(b => b.id))
+    const ids = sim.bookingIds.filter(i => exist.has(i))
+    const missing = sim.bookingIds.length - ids.length
+    setSimId(id)
+    setCellsP(() => new Set(sim.cells))
+    setMode(sim.mode); persist('capMode', sim.mode)
+    setQty(sim.qty || {})
+    setAddOv(sim.addOverride || {})
+    const off = Number(sim.cutoffOffset)
+    if (Number.isFinite(off)) { setCutoffOffset(off); persist('capCutoffOffset', String(off)) }
+    onSelectIds?.(new Set(ids))
+    setSimMsg(missing > 0 ? `불러옴 — 삭제된 부킹 ${missing}건 제외` : '불러왔습니다')
+    setTimeout(() => setSimMsg(''), 3000)
+  }
+
+  const deleteSim = () => {
+    const sim = sims.find(x => x.id === simId)
+    if (!sim) return
+    if (!confirm(`"${sim.name}" 시뮬레이션을 삭제할까요?`)) return
+    setSimId('')
+    persistSims(sims.filter(x => x.id !== sim.id), '삭제됨')
+  }
+
   const toggleCell = (p: string, c: string) => setCellsP(s => { const n = new Set(s); const k = cellKey(p, c); if (n.has(k)) n.delete(k); else n.add(k); return n })
   const toggleMany = (keys: string[]) => setCellsP(s => {
     const n = new Set(s); const all = keys.every(k => n.has(k))
@@ -114,9 +201,9 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
   const sums = useMemo(() => (data ? sumCells(data, validCells, mode) : null), [data, validCells, mode])
   const result = useMemo(
     () => (data && picked.length > 0
-      ? calcSelection({ rows: picked, data, cells: validCells, mode, qty, cutoffOffset })
+      ? calcSelection({ rows: picked, data, cells: validCells, mode, qty, cutoffOffset, addOverride: addOv })
       : null),
-    [data, picked, validCells, mode, qty, cutoffOffset])
+    [data, picked, validCells, mode, qty, cutoffOffset, addOv])
 
   // 표 복사: 화면과 같은 구조(11열, 병합·색·테두리)를 HTML로 복사 → 엑셀/워드에 붙여넣으면 열 위치와 테두리가 그대로 유지된다.
   // 같은 내용을 탭 구분 텍스트로도 함께 담아, 메모장 등에는 텍스트로 붙는다.
@@ -262,6 +349,24 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
                 {validCells.size > 0 && (
                   <button type="button" className="px-2 py-0.5 border border-slate-300 rounded hover:bg-slate-50" onClick={() => setCellsP(() => new Set())}>선택 해제</button>
                 )}
+                <span className="w-full h-0" />
+                <span className="text-slate-500">시뮬레이션:</span>
+                <select value={simId} onChange={e => { const v = e.target.value; if (v) loadSim(v); else setSimId('') }}
+                  className="border border-slate-300 rounded px-1 py-0.5 max-w-[220px]">
+                  <option value="">저장된 시뮬레이션 선택…</option>
+                  {sims.map(x => (
+                    <option key={x.id} value={x.id}>{x.name} ({x.savedAt.slice(5, 10)}, 모선 {x.bookingIds.length})</option>
+                  ))}
+                </select>
+                <button type="button" onClick={saveSim} disabled={simSaving}
+                  className="px-2 py-0.5 border border-indigo-300 bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100 disabled:opacity-50">
+                  현재 상태 저장
+                </button>
+                {simId && (
+                  <button type="button" onClick={deleteSim} disabled={simSaving}
+                    className="px-2 py-0.5 border border-red-200 bg-red-50 text-red-600 rounded hover:bg-red-100 disabled:opacity-50">삭제</button>
+                )}
+                {simMsg && <span className={simMsg.startsWith('저장 실패') ? 'text-red-600' : 'text-emerald-600'}>{simMsg}</span>}
               </div>
             </div>
           )}
@@ -305,7 +410,7 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
                           <td colSpan={7}>초기 잔량 <span className="font-normal text-slate-500">(선택한 PDC×선사의 현재 마감 안 친 컨테이너 합)</span></td>
                           <td>-</td><td>-</td><td>{result.initial}</td><td>-</td>
                         </tr>
-                        {result.groups.map(g => <GroupRows key={g.cutoff} g={g} qty={qty} setQty={setQty} />)}
+                        {result.groups.map(g => <GroupRows key={g.cutoff} g={g} qty={qty} setQty={setQty} addOv={addOv} setAddOv={setAddOv} />)}
                         <tr className="bg-slate-200 font-bold text-center">
                           <td colSpan={7}>전체 합계 (확보/추가) · 최종 잔량</td>
                           <td>{result.totalSecured}</td>
@@ -320,7 +425,8 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
                   </div>
                   <div className="text-[11px] text-slate-400 mt-1">
                     잔량 = 이월 + 추가 − 확보 (부족만 다음 모선으로 이월). 계산구간은 <b>서류마감일 {cutoffOffset === 0 ? '당일' : `${cutoffOffset}일`}</b>까지이며, 그 이후 발생하는 출하는 그 모선에 싣지 못하고 다음 모선 구간으로 넘어갑니다.
-                    추가 = 하루 예상 출하 × 구간 영업일. 확보수량은 직접 고칠 수 있습니다.
+                    추가 = 하루 예상 출하 × 구간 영업일이며, 확보수량과 추가 모두 직접 고칠 수 있습니다(↺로 자동값 복원).
+                    '현재 상태 저장'을 누르면 체크한 모선·선택 칸·기준·수정값이 함께 저장되어 나중에 그대로 불러올 수 있습니다.
                   </div>
                 </>
               )}

@@ -188,6 +188,24 @@ export async function saveScheduleDestGroups(
   return { error: null }
 }
 
+// ── 예상선복확인: 시뮬레이션 저장 (전체 공유) ────────────────────────
+
+export async function saveCapacitySims(
+  sims: unknown[]
+): Promise<{ error: string | null }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: '로그인이 필요합니다.' }
+
+  const { error } = await supabase
+    .from('global_settings')
+    .upsert({ key: 'capacity_sims', value: sims })
+
+  if (error) return { error: error.message }
+  revalidatePath('/bookings')
+  return { error: null }
+}
+
 // ── 서류마감: 레일 구간 최종도착지 저장 (전체 공유) ─────────────────
 
 export async function saveRailDests(

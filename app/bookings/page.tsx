@@ -45,6 +45,7 @@ export default async function BookingsPage() {
     { data: teamTruckSetting },
     { data: etaTransitSetting },
     { data: railSetting },
+    { data: capSimSetting },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -75,6 +76,7 @@ export default async function BookingsPage() {
     supabase.from('global_settings').select('value').eq('key', 'team_truck_dests').single(),
     supabase.from('global_settings').select('value').eq('key', 'eta_transit_days').single(),
     supabase.from('global_settings').select('value').eq('key', 'rail_dests').single(),
+    supabase.from('global_settings').select('value').eq('key', 'capacity_sims').single(),
   ])
 
   // seq_no·alloc_qty 병합 (컬럼 없거나 오류 시 무시)
@@ -124,6 +126,7 @@ export default async function BookingsPage() {
       teamTruckDests={(teamTruckSetting?.value as string[] | null) || []}
       etaTransitDays={(etaTransitSetting?.value as Record<string, number> | null) || {}}
       railNotes={normalizeRailNotes(railSetting?.value)}
+      capacitySims={Array.isArray(capSimSetting?.value) ? capSimSetting.value : []}
       regionList={(regionSetting?.value as string[] | null) || []}
       customerList={(customerSetting?.value as string[] | null) || []}
       baseColDescriptions={(baseDescSetting?.value as Record<string, string> | null) || {}}

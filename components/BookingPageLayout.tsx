@@ -10,6 +10,7 @@ import SecuredSpaceTab from './SecuredSpaceTab'
 import CutoffEtdTab from './CutoffEtdTab'
 import EtdSyncTab from './EtdSyncTab'
 import CapacityPanel from './CapacityPanel'
+import type { CapSim } from '@/lib/capacity'
 import { signOut } from '@/app/bookings/actions'
 import type { EtdHintCand } from '@/app/bookings/etdSyncActions'
 import { normVessel } from '@/lib/terminal-schedule'
@@ -39,6 +40,7 @@ interface Props {
   teamTruckDests?: string[]
   etaTransitDays?: Record<string, number>
   railNotes?: Record<string, string>
+  capacitySims?: unknown[]
 }
 
 const TABS: { key: Tab; label: string; sub: string; icon: React.ReactNode }[] = [
@@ -138,7 +140,7 @@ const MASTER_EMAIL = 'hahajunhee@glovis.net'
 export default function BookingPageLayout({
   bookings, profiles, currentUserId, currentUserEmail, currentProfile, customLists, customColumns,
   regionList, customerList, baseColDescriptions, baseColLabels = {}, destinationSortOrder = [],
-  scheduleDestGroups = [], scheduleBlankWeeks = {}, securedBases = {}, teamTruckDests = [], etaTransitDays = {}, railNotes = {},
+  scheduleDestGroups = [], scheduleBlankWeeks = {}, securedBases = {}, teamTruckDests = [], etaTransitDays = {}, railNotes = {}, capacitySims = [],
 }: Props) {
   const isMaster = currentUserEmail === MASTER_EMAIL
   const [activeTab, setActiveTab] = useState<Tab>('bookings')
@@ -360,7 +362,14 @@ export default function BookingPageLayout({
         <main className="flex-1 min-w-0 overflow-hidden flex flex-col">
           {(activeTab === 'bookings' || activeTab === 'capacity') && (
             <div className="flex-1 min-h-0 flex flex-col p-2 md:p-4">
-              {activeTab === 'capacity' && <CapacityPanel bookings={bookings} selectedIds={capSelected} />}
+              {activeTab === 'capacity' && (
+                <CapacityPanel
+                  bookings={bookings}
+                  selectedIds={capSelected}
+                  onSelectIds={setCapSelected}
+                  initialSims={capacitySims as CapSim[]}
+                />
+              )}
               <BookingTable
                 key={activeTab}
                 bookings={bookings}
