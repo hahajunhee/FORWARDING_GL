@@ -23,8 +23,11 @@ export function unitQty(b: Booking): number {
 const ms = (d: string) => { const [y, m, dd] = d.split('-').map(Number); return Date.UTC(y, m - 1, dd) }
 const ymd = (t: number) => new Date(t).toISOString().slice(0, 10)
 export const calDays = (a: string, b: string) => Math.round((ms(b) - ms(a)) / 86400000)
-/** 하루 전 날짜 (YYYY-MM-DD) */
-export const prevDay = (d: string) => ymd(ms(d) - 86400000)
+/** n일 이동한 날짜 (YYYY-MM-DD) */
+export const shiftDay = (d: string, n: number) => ymd(ms(d) + n * 86400000)
+/** 계산구간 끝을 마감일에서 며칠 당길지 (0 = 마감일 당일까지) */
+export const CUTOFF_OFFSETS = [0, -1, -2, -3] as const
+export type CutoffOffset = 0 | -1 | -2 | -3
 
 /** (from, to] 구간의 비휴일 일수 */
 export function workDays(from: string, to: string, holidays: Set<string>): number {
@@ -73,12 +76,15 @@ export interface CapResult {
 /**
  * 서류마감일 순으로 구간을 나눠, 구간 안에서 발생한 출하만 그 구간의 모선에 배정한다.
  *   잔량 = 이월 + 추가 − 확보  (양수=부족, 음수=여유). 부족만 다음 모선으로 이월된다.
- *   구간 끝은 서류마감 '전일' — 마감 당일 발생한 출하는 그 모선에 못 싣는다(다음 구간 몫).
+ *   구간 끝은 서류마감일 + cutoffOffset (기본 -1 = 마감 전일) — 그 이후 발생분은 다음 구간 몫.
  */
 export function calcSelection(opts: {
-  rows: Booking[]; data: CapData; cells: Set<string>; mode: FcMode; qty?: Record<string, number>
+  rows: Booking[]; data: CapData; cells: Set<string>; mode: FcMode
+  qty?: Record<string, number>
+  cutoffOffset?: number   // 0 ~ -3 (기본 -1: 마감 전일까지)
 }): CapResult {
   const { rows, data, cells, mode } = opts
+  const off = Math.min(0, Math.max(-3, Math.round(opts.cutoffOffset ?? -1)))
   const hol = new Set(data.holidays)
   const { initial, perDay, pdcs } = sumCells(data, cells, mode)
 
@@ -92,8 +98,8 @@ export function calcSelection(opts: {
   let carry = initial, prev = data.today, totalSecured = 0, totalAdd = 0, spare = 0
   for (const cutoff of [...byCut.keys()].sort()) {
     const gr = byCut.get(cutoff)!.sort((a, b) => (a.updated_etd || a.proforma_etd || '').localeCompare(b.updated_etd || b.proforma_etd || ''))
-    // 마감 당일 발생분은 싣지 못하므로 구간 끝을 마감 전일로 잡는다 (기존 9일 → 8일)
-    const end = prevDay(cutoff)
+    // 구간 끝 = 마감일 + 오프셋 (기본 -1 → 마감 전일까지만 그 모선에 배정)
+    const end = shiftDay(cutoff, off)
     const days = Math.max(0, calDays(prev, end))
     const wd = end > prev ? workDays(prev, end, hol) : 0
     const add = Math.round(perDay * wd)

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Booking } from '@/types'
 import { formatContainers } from './BookingTable'
-import { calcSelection, cellKey, sumCells, unitQty, type CapData, type CapGroup, type FcMode } from '@/lib/capacity'
+import { calcSelection, cellKey, sumCells, unitQty, CUTOFF_OFFSETS, type CapData, type CapGroup, type FcMode } from '@/lib/capacity'
 
 const md = (d: string | null | undefined) => (d ? d.slice(5).replace('-', '/') : '-')
 const fmt1 = (n: number) => (Math.round(n * 10) / 10).toString()
@@ -67,6 +67,8 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
   const [mode, setMode] = useState<FcMode>('pdc')
   const [qty, setQty] = useState<Record<string, number>>({})
   const [copied, setCopied] = useState(false)
+  // 계산구간 끝 = 서류마감일 + 오프셋 (오전엔 -1, 오후엔 -2 식으로 조정)
+  const [cutoffOffset, setCutoffOffset] = useState<number>(-1)
 
   // 마지막 선택 복원(이 브라우저에서만)
   useEffect(() => {
@@ -74,6 +76,8 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
       setOpen(localStorage.getItem('capPanelOpen') !== '0')
       const c = JSON.parse(localStorage.getItem('capCells') || '[]'); if (Array.isArray(c)) setCells(new Set(c))
       const m = localStorage.getItem('capMode'); if (m === 'pdc' || m === 'cells') setMode(m)
+      const off = Number(localStorage.getItem('capCutoffOffset'))
+      if (Number.isFinite(off) && off <= 0 && off >= -3) setCutoffOffset(off)
     } catch { /* 저장소 없음 */ }
   }, [])
   const persist = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* 저장소 없음 */ } }
@@ -109,8 +113,10 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
   const validCells = useMemo(() => new Set([...cells].filter(k => { const [p, c] = k.split('|'); return !!grid?.has(p, c) })), [cells, grid])
   const sums = useMemo(() => (data ? sumCells(data, validCells, mode) : null), [data, validCells, mode])
   const result = useMemo(
-    () => (data && picked.length > 0 ? calcSelection({ rows: picked, data, cells: validCells, mode, qty }) : null),
-    [data, picked, validCells, mode, qty])
+    () => (data && picked.length > 0
+      ? calcSelection({ rows: picked, data, cells: validCells, mode, qty, cutoffOffset })
+      : null),
+    [data, picked, validCells, mode, qty, cutoffOffset])
 
   // 표 복사: 화면과 같은 구조(11열, 병합·색·테두리)를 HTML로 복사 → 엑셀/워드에 붙여넣으면 열 위치와 테두리가 그대로 유지된다.
   // 같은 내용을 탭 구분 텍스트로도 함께 담아, 메모장 등에는 텍스트로 붙는다.
@@ -244,6 +250,15 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
                   선택한 칸만
                 </label>
                 <span className="text-purple-700">하루 예상 출하 <b>{fmt1(sums?.perDay ?? 0)}</b>대 (영업일 기준)</span>
+                <span className="text-slate-500">계산구간 끝:</span>
+                <select value={cutoffOffset}
+                  onChange={e => { const v = Number(e.target.value); setCutoffOffset(v); persist('capCutoffOffset', String(v)) }}
+                  className="border border-slate-300 rounded px-1 py-0.5"
+                  title="서류마감일 기준으로 며칠 전까지 발생한 출하를 그 모선에 배정할지 — 오전엔 -1, 오후엔 -2처럼 조정">
+                  {CUTOFF_OFFSETS.map(o => (
+                    <option key={o} value={o}>{o === 0 ? '마감일 당일' : `마감일 ${o}일`}</option>
+                  ))}
+                </select>
                 {validCells.size > 0 && (
                   <button type="button" className="px-2 py-0.5 border border-slate-300 rounded hover:bg-slate-50" onClick={() => setCellsP(() => new Set())}>선택 해제</button>
                 )}
@@ -304,7 +319,7 @@ export default function CapacityPanel({ bookings, selectedIds }: { bookings: Boo
                     </table>
                   </div>
                   <div className="text-[11px] text-slate-400 mt-1">
-                    잔량 = 이월 + 추가 − 확보 (부족만 다음 모선으로 이월). 계산구간은 <b>서류마감 전일</b>까지이며, 마감 당일 이후 발생하는 출하는 그 모선에 싣지 못하고 다음 모선 구간으로 넘어갑니다.
+                    잔량 = 이월 + 추가 − 확보 (부족만 다음 모선으로 이월). 계산구간은 <b>서류마감일 {cutoffOffset === 0 ? '당일' : `${cutoffOffset}일`}</b>까지이며, 그 이후 발생하는 출하는 그 모선에 싣지 못하고 다음 모선 구간으로 넘어갑니다.
                     추가 = 하루 예상 출하 × 구간 영업일. 확보수량은 직접 고칠 수 있습니다.
                   </div>
                 </>
